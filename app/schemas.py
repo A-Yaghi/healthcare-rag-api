@@ -1,0 +1,38 @@
+from pydantic import BaseModel, Field
+
+
+class QueryRequest(BaseModel):
+    question: str = Field(..., min_length=3, max_length=1000, examples=[
+        "What is multimodal fusion in medical imaging?"
+    ])
+    top_k: int | None = Field(default=None, ge=1, le=10)
+
+
+class SourceChunk(BaseModel):
+    doc_id: str
+    title: str
+    text: str
+    score: float
+
+
+class QueryResponse(BaseModel):
+    answer: str
+    sources: list[SourceChunk]
+    generation_mode: str
+    latency_ms: float
+
+
+class HealthResponse(BaseModel):
+    status: str
+    app: str
+    environment: str
+    generation_mode: str
+    indexed_chunks: int
+    embedding_model: str
+
+
+class MetricsResponse(BaseModel):
+    request_count: int
+    avg_latency_ms: float
+    p95_latency_ms: float
+    last_latency_ms: float | None

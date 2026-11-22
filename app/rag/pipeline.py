@@ -1,0 +1,124 @@
+from __future__ import annotations
+
+import json
+import time
+from pathlib import Path
+
+import numpy as np
+
+from app.config import Settings
+from app.rag.documents import load_knowledge_chunks
+from app.rag.embeddings import (
+    EmbeddingBackend,
+    HashEmbeddingBackend,
+    SentenceTransformerBackend,
+)
+from app.rag.generator import AnswerGenerator, ExtractiveGenerator, FlanT5Generator
+from app.rag.store import FaissStore
+from app.schemas import QueryResponse, SourceChunk
+
+
+class RAGPipeline:
+    def __init__(
+        self,
+        store: FaissStore,
+        embedder: EmbeddingBackend,
+        generator: AnswerGenerator,
+        generation_mode: str,
+        default_top_k: int,
+    ) -> None:
+        self.store = store
+        self.embedder = embedder
+        self.generator = generator
+        self.generation_mode = generation_mode
+        self.default_top_k = default_top_k
+
+    @property
+    def indexed_chunks(self) -> int:
+        return self.store.size
+
+    def query(self, question: str, top_k: int | None = None) -> QueryResponse:
+        started = time.perf_counter()
+        k = top_k or self.default_top_k
+        query_vec = self.embedder.embed([question])
+        hits = self.store.search(query_vec, k)
+        contexts = [chunk for chunk, _ in hits]
+        answer = self.generator.generate(question, contexts)
+        latency_ms = (time.perf_counter() - started) * 1000
+
+        sources = [
+            SourceChunk(
+                doc_id=chunk.doc_id,
+                title=chunk.title,
+                text=chunk.text,
+                score=round(score, 4),
+            )
+            for chunk, score in hits
+        ]
+        return QueryResponse(
+            answer=answer,
+            sources=sources,
+            generation_mode=self.generation_mode,
+            latency_ms=round(latency_ms, 2),
+        )
+
+
+def _build_embedder(settings: Settings, offline: bool) -> EmbeddingBackend:
+    if offline:
+        return HashEmbeddingBackend()
+    return SentenceTransformerBackend(settings.embedding_model)
+
+
+def _build_generator(settings: Settings, offline: bool) -> AnswerGenerator:
+    mode = settings.generation_mode.lower().strip()
+    if offline or mode == "retrieve":
+        return ExtractiveGenerator()
+    if mode == "generate":
+        return FlanT5Generator(settings.generator_model)
+    raise ValueError("GENERATION_MODE must be 'retrieve' or 'generate'")
+
+
+def build_or_load_store(
+    settings: Settings,
+    embedder: EmbeddingBackend,
+    embedder_name: str,
+    rebuild: bool = False,
+) -> FaissStore:
+    index_dir = Path(settings.index_dir)
+    index_file = index_dir / "index.faiss"
+    chunks_file = index_dir / "chunks.json"
+    meta_file = index_dir / "meta.json"
+
+    if not rebuild and index_file.exists() and chunks_file.exists() and meta_file.exists():
+        meta = json.loads(meta_file.read_text(encoding="utf-8"))
+        if meta.get("embedder") == embedder_name:
+            return FaissStore.load(index_dir)
+
+    chunks = load_knowledge_chunks(Path(settings.knowledge_dir))
+    vectors = embedder.embed([c.text for c in chunks])
+    store = FaissStore.build(np.asarray(vectors, dtype=np.float32), chunks)
+    store.save(index_dir)
+    meta_file.write_text(
+        json.dumps({"embedder": embedder_name}, indent=2),
+        encoding="utf-8",
+    )
+    return store
+
+
+def create_pipeline(settings: Settings, offline: bool | None = None) -> RAGPipeline:
+    use_offline = settings.offline_embeddings if offline is None else offline
+    embedder = _build_embedder(settings, offline=use_offline)
+    generator = _build_generator(settings, offline=use_offline)
+    mode = settings.generation_mode.lower().strip()
+    if use_offline or mode == "retrieve":
+        mode = "retrieve"
+
+    embedder_name = "hash" if use_offline else settings.embedding_model
+    store = build_or_load_store(settings, embedder, embedder_name=embedder_name)
+    return RAGPipeline(
+        store=store,
+        embedder=embedder,
+        generator=generator,
+        generation_mode=mode,
+        default_top_k=settings.top_k,
+    )

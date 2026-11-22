@@ -1,0 +1,23 @@
+services:
+  rag-api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      API_KEY: ${API_KEY:-dev-secret-change-me}
+      APP_NAME: Healthcare RAG API
+      ENVIRONMENT: docker
+      GENERATION_MODE: retrieve
+      OFFLINE_EMBEDDINGS: "false"
+      EMBEDDING_MODEL: sentence-transformers/all-MiniLM-L6-v2
+      TOP_K: 3
+      INDEX_DIR: /app/data/index
+      KNOWLEDGE_DIR: /app/data/knowledge
+    volumes:
+      - ./data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
