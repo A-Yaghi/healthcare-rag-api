@@ -178,6 +178,20 @@ def test_privacy_medical_data_question(settings: Settings) -> None:
     assert "privacy" in answer.lower() or "constrained" in answer.lower()
 
 
+def test_mammography_safety_question(settings: Settings) -> None:
+    chunks = [
+        c
+        for c in load_knowledge_chunks(settings.knowledge_dir)
+        if "mammogram" in c.text.lower() or "mammography" in c.text.lower()
+    ][:4]
+    answer = ExtractiveGenerator().generate("Are mammographies safe?", chunks)
+    assert "don't know" not in answer.lower()
+    assert any(
+        term in answer.lower()
+        for term in ("mammogram", "radiation", "risk", "benefit", "harm", "screening")
+    )
+
+
 def test_extractive_pros_cons(settings: Settings) -> None:
     chunks = [
         c

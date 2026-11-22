@@ -18,6 +18,7 @@ _COMMON_DOMAIN = {
     "cancer", "breast", "device", "devices", "system", "systems", "model", "models",
     "data", "research", "patient", "patients", "care", "clinical", "public", "world",
     "organization", "who", "fda", "risk", "risks", "benefit", "benefits",
+    "safe", "safety",
 }
 
 _SYNONYMS = {
@@ -35,7 +36,13 @@ _SYNONYMS = {
     "freely": {"free", "unrestricted", "privacy", "consent", "protection", "gdpr"},
     "profitable": {"profit", "revenue", "commercial", "business", "money"},
     "privacy": {"protection", "confidential", "gdpr", "consent", "personal"},
-    "screening": {"mammogram", "mammography", "screen"},
+    "screening": {"mammogram", "mammography", "mammograms", "screen"},
+    "mammographies": {"mammography", "mammogram", "mammograms", "screening"},
+    "mammography": {"mammogram", "mammograms", "mammographies", "screening"},
+    "mammogram": {"mammography", "mammograms", "mammographies", "screening"},
+    "mammograms": {"mammogram", "mammography", "mammographies", "screening"},
+    "safe": {"safety", "risk", "harm", "harms", "radiation", "benefit"},
+    "safety": {"safe", "risk", "harm", "harms", "radiation", "benefit"},
 }
 
 _PRIVACY_QUESTION_CUES = (
@@ -64,6 +71,33 @@ _PRIVACY_DOC_TERMS = (
     "personal health data",
     "lawful",
     "cybersecurity",
+)
+
+_MAMMO_QUESTION_CUES = (
+    "mammograph",
+    "mammogram",
+    "breast screening",
+    "breast cancer screening",
+    "screening mamm",
+    "dense breast",
+    "microcalcification",
+    "bi-rads",
+    "birads",
+)
+
+_MAMMO_DOC_TERMS = (
+    "mammogram",
+    "mammography",
+    "screening",
+    "radiation",
+    "false-positive",
+    "false positive",
+    "false-negative",
+    "overdiagnosis",
+    "bi-rads",
+    "microcalcification",
+    "dense breast",
+    "tomosynthesis",
 )
 
 
@@ -102,18 +136,43 @@ def is_privacy_question(question: str) -> bool:
     return any(cue in q for cue in _PRIVACY_QUESTION_CUES)
 
 
+def is_mammography_question(question: str) -> bool:
+    q = question.lower()
+    return any(cue in q for cue in _MAMMO_QUESTION_CUES)
+
+
 def privacy_search_query(question: str) -> str:
-    """Rewrite privacy questions so vector search finds governance docs, not cancer pages."""
     return (
         f"{question} privacy data protection consent GDPR medical personal health data "
         "lawful basis safeguards cybersecurity"
     )
 
 
-def _privacy_doc_score(chunk: Chunk) -> float:
+def mammography_search_query(question: str) -> str:
+    return (
+        f"{question} mammogram mammography breast cancer screening radiation exposure "
+        "benefits harms false positive false negative overdiagnosis"
+    )
+
+
+def extra_search_queries(question: str) -> list[str]:
+    extras: list[str] = []
+    if is_privacy_question(question):
+        extras.append(privacy_search_query(question))
+    if is_mammography_question(question):
+        extras.append(mammography_search_query(question))
+    return extras
+
+
+def _topic_doc_score(question: str, chunk: Chunk) -> float:
     text = f"{chunk.title} {chunk.source} {chunk.text}".lower()
-    hits = sum(1 for term in _PRIVACY_DOC_TERMS if term in text)
-    return min(1.0, hits / 4.0)
+    if is_privacy_question(question):
+        hits = sum(1 for term in _PRIVACY_DOC_TERMS if term in text)
+        return min(1.0, hits / 4.0)
+    if is_mammography_question(question):
+        hits = sum(1 for term in _MAMMO_DOC_TERMS if term in text)
+        return min(1.0, hits / 4.0)
+    return 0.0
 
 
 def rerank_hits(
@@ -124,14 +183,13 @@ def rerank_hits(
     if not hits:
         return []
 
-    privacy_q = is_privacy_question(question)
+    topical = is_privacy_question(question) or is_mammography_question(question)
     scored: list[tuple[float, Chunk, float]] = []
     for chunk, vector_score in hits:
         blob = f"{chunk.title} {chunk.source} {chunk.text}"
         lex = lexical_overlap_score(question, blob)
-        if privacy_q:
-            topic = _privacy_doc_score(chunk)
-            # Strongly prefer privacy/governance passages over generic medical pages.
+        if topical:
+            topic = _topic_doc_score(question, chunk)
             combined = (
                 (0.25 * float(vector_score))
                 + (0.25 * lex)
@@ -169,8 +227,16 @@ def evidence_is_sufficient(
     if is_privacy_question(question):
         return any(term in joined.lower() for term in _PRIVACY_DOC_TERMS)
 
+    if is_mammography_question(question):
+        return any(term in joined.lower() for term in _MAMMO_DOC_TERMS)
+
     if any(word in q for word in ("benefit", "risk", "negative", "positive", "pros", "cons")):
         if any(word in joined.lower() for word in ("benefit", "risk", "harm", "privacy", "bias")):
+            return True
+
+    # Generic "is X safe?" with radiation/imaging context in evidence.
+    if "safe" in q or "safety" in q:
+        if any(term in joined.lower() for term in ("radiation", "risk", "harm", "benefit", "mammogram")):
             return True
 
     distinctive = distinctive_question_terms(question)

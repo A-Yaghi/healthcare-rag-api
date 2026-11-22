@@ -20,10 +20,10 @@ from app.rag.generator import (
     FlanT5Generator,
     HybridGenerator,
 )
-from app.rag.retrieve import is_privacy_question, privacy_search_query, rerank_hits
+from app.rag.documents import Chunk
+from app.rag.retrieve import extra_search_queries, rerank_hits
 from app.rag.store import FaissStore
 from app.schemas import ChatMessage, ChatResponse, QueryResponse, SourceChunk
-from app.rag.documents import Chunk
 
 
 class RAGPipeline:
@@ -52,9 +52,7 @@ class RAGPipeline:
     def _retrieve(self, question: str, top_k: int) -> list[tuple[Chunk, float]]:
         # Over-fetch then rerank so different questions don't collapse to the same docs.
         candidate_k = min(max(top_k * 5, top_k), max(self.store.size, top_k))
-        queries = [question]
-        if is_privacy_question(question):
-            queries.append(privacy_search_query(question))
+        queries = [question, *extra_search_queries(question)]
 
         merged: dict[str, tuple[Chunk, float]] = {}
         for query in queries:
