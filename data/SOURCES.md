@@ -6,7 +6,13 @@ It is **not medical advice** and is **not affiliated with** WHO, FDA, Health Can
 | File | Organization | Licence / reuse notes | Original URL |
 |------|--------------|-----------------------|--------------|
 | `knowledge/medlineplus_mammography.md` | MedlinePlus / U.S. National Library of Medicine | Public domain U.S. government work; attribute MedlinePlus/NLM | https://medlineplus.gov/mammography.html |
+| `knowledge/medlineplus_breast_cancer.md` | MedlinePlus / NLM | Public domain U.S. government work | https://medlineplus.gov/breastcancer.html |
+| `knowledge/medlineplus_medical_imaging_tests.md` | MedlinePlus / NLM | Public domain U.S. government work | https://medlineplus.gov/breastcancer.html |
+| `knowledge/cdc_breast_cancer_basics.md` | Centers for Disease Control and Prevention (CDC) | Public domain U.S. government work | https://www.cdc.gov/breast-cancer/about/index.html |
+| `knowledge/cdc_breast_cancer_screening.md` | CDC | Public domain U.S. government work | https://www.cdc.gov/breast-cancer/screening/index.html |
 | `knowledge/nci_mammograms.md` | National Cancer Institute (NIH) | Public domain U.S. government work | https://www.cancer.gov/types/breast/mammograms-fact-sheet |
+| `knowledge/nci_breast_cancer_screening.md` | National Cancer Institute (NIH) | Public domain U.S. government work | https://www.cancer.gov/types/breast/patient/breast-screening-pdq |
+| `knowledge/who_medical_ionizing_radiation.md` | World Health Organization | WHO public Q&A / CC BY-NC-SA materials with attribution | https://www.who.int/news-room/questions-and-answers/item/radiation-ionizing-radiation |
 | `knowledge/fda_hc_mhra_gmlp.md` | FDA, Health Canada, UK MHRA | Joint GMLP principles; FDA PDF is a U.S. government work; Canada.ca page reproduced with attribution for educational non-commercial use | https://www.canada.ca/en/health-canada/services/drugs-health-products/medical-devices/good-machine-learning-practice-medical-device-development.html · https://www.fda.gov/media/153486/download |
 | `knowledge/fda_mlmd_transparency.md` | FDA, Health Canada, UK MHRA | FDA web publication / joint guiding principles with attribution | https://www.fda.gov/medical-devices/artificial-intelligence-enabled-medical-devices/transparency-machine-learning-enabled-medical-devices-guiding-principles |
 | `knowledge/fda_aiml_medical_devices.md` | U.S. FDA | Public domain U.S. government work | https://www.fda.gov/medical-devices/artificial-intelligence-enabled-medical-devices/transparency-machine-learning-enabled-medical-devices-guiding-principles |
@@ -20,7 +26,7 @@ It is **not medical advice** and is **not affiliated with** WHO, FDA, Health Can
 
 - **Application code** in this repository: MIT (see `LICENSE`).
 - **WHO excerpts** in `data/knowledge/who_*.md`: remain under **CC BY-NC-SA 3.0 IGO**. They are adapted for non-commercial educational use with attribution; share-alike applies to those adapted texts. The WHO logo is not used and no WHO endorsement is implied.
-- **U.S. government works** (MedlinePlus, NCI, FDA materials): generally not copyrighted under U.S. law; please keep source attribution.
+- **U.S. government works** (MedlinePlus health-topic summaries, CDC, NCI, FDA materials): generally not copyrighted under U.S. law; please keep source attribution. Do **not** reuse MedlinePlus A.D.A.M. Medical Encyclopedia content (copyrighted).
 - **EU materials**: reproduced with attribution for educational non-commercial portfolio use.
 
 ## How attribution appears in the API

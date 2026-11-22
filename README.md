@@ -13,8 +13,10 @@ Indexed documents are listed with licence notes in [`data/SOURCES.md`](data/SOUR
 
 | Source | What we use | Licence |
 |--------|-------------|---------|
-| [MedlinePlus / NLM](https://medlineplus.gov/mammography.html) | Mammography health-topic summary | Public domain (U.S. government) |
-| [National Cancer Institute](https://www.cancer.gov/types/breast/mammograms-fact-sheet) | Mammograms fact sheet (calcifications, BI-RADS, DBT) | Public domain (U.S. government) |
+| [MedlinePlus / NLM](https://medlineplus.gov/mammography.html) | Mammography + breast cancer health-topic summaries | Public domain (U.S. government) |
+| [CDC Breast Cancer](https://www.cdc.gov/breast-cancer/about/index.html) | Breast cancer basics + screening recommendations | Public domain (U.S. government) |
+| [National Cancer Institute](https://www.cancer.gov/types/breast/mammograms-fact-sheet) | Mammograms + breast cancer screening PDQ | Public domain (U.S. government) |
+| [WHO ionizing radiation Q&A](https://www.who.int/news-room/questions-and-answers/item/radiation-ionizing-radiation) | Medical imaging radiation justification/optimization | WHO / CC BY-NC-SA with attribution |
 | [FDA / Health Canada / MHRA GMLP](https://www.canada.ca/en/health-canada/services/drugs-health-products/medical-devices/good-machine-learning-practice-medical-device-development.html) | 10 Good Machine Learning Practice principles | U.S. gov work / attributed Crown materials |
 | [FDA MLMD transparency principles](https://www.fda.gov/medical-devices/artificial-intelligence-enabled-medical-devices/transparency-machine-learning-enabled-medical-devices-guiding-principles) | Transparency / explainability for ML medical devices | U.S. gov / joint principles with attribution |
 | [WHO AI ethics guidance (2021)](https://www.who.int/publications/i/item/9789240029200) | Six consensus ethical principles for AI for health | **CC BY-NC-SA 3.0 IGO** |
