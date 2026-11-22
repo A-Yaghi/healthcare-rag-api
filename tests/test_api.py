@@ -146,8 +146,10 @@ def test_extractive_pros_cons(settings: Settings) -> None:
         "What are the benefits and negatives of using AI in the healthcare field?",
         chunks[:4],
     )
-    assert "Potential benefits" in answer
-    assert "Potential risks" in answer
+    assert "positive side" in answer.lower()
+    assert "risk side" in answer.lower()
+    assert "…" not in answer
+    assert "..." not in answer
 
 
 def test_pipeline_offline(settings: Settings) -> None:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,6 +17,7 @@ class Chunk:
 
 
 _FRONTMATTER_RE = re.compile(r"\A---\s*\n(.*?)\n---\s*\n(.*)\Z", re.DOTALL)
+_SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
 
 
 def _parse_frontmatter(raw: str) -> tuple[dict[str, str], str]:
@@ -32,22 +34,46 @@ def _parse_frontmatter(raw: str) -> tuple[dict[str, str], str]:
     return meta, match.group(2).strip()
 
 
-def _chunk_text(text: str, max_chars: int = 700, overlap: int = 100) -> list[str]:
+def split_sentences(text: str) -> list[str]:
     cleaned = " ".join(text.split())
-    if len(cleaned) <= max_chars:
-        return [cleaned] if cleaned else []
+    if not cleaned:
+        return []
+    parts = _SENTENCE_RE.split(cleaned)
+    return [p.strip() for p in parts if p.strip()]
+
+
+def _chunk_text(text: str, max_chars: int = 900) -> list[str]:
+    """Chunk on sentence boundaries so answers never start mid-phrase."""
+    sentences = split_sentences(text)
+    if not sentences:
+        return []
 
     chunks: list[str] = []
-    start = 0
-    while start < len(cleaned):
-        end = min(len(cleaned), start + max_chars)
-        piece = cleaned[start:end].strip()
-        if piece:
-            chunks.append(piece)
-        if end == len(cleaned):
-            break
-        start = max(0, end - overlap)
+    current: list[str] = []
+    length = 0
+    for sentence in sentences:
+        extra = len(sentence) + (1 if current else 0)
+        if current and length + extra > max_chars:
+            chunks.append(" ".join(current))
+            current = [sentence]
+            length = len(sentence)
+        else:
+            current.append(sentence)
+            length += extra
+    if current:
+        chunks.append(" ".join(current))
     return chunks
+
+
+def knowledge_fingerprint(knowledge_dir: Path) -> str:
+    digest = hashlib.sha256()
+    for path in sorted(knowledge_dir.glob("*.md")):
+        digest.update(path.name.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    digest.update(b"chunking:sentence-v2")
+    return digest.hexdigest()[:16]
 
 
 def load_knowledge_chunks(knowledge_dir: Path) -> list[Chunk]:

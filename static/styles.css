@@ -165,12 +165,26 @@ body {
 }
 
 .msg {
-  max-width: min(760px, 92%);
+  max-width: min(820px, 96%);
   padding: 0.9rem 1rem;
   border-radius: 18px;
   line-height: 1.55;
-  white-space: pre-wrap;
+  overflow: visible;
   animation: rise 0.28s ease;
+}
+
+.answer-body {
+  overflow: visible;
+}
+
+.answer-p {
+  margin: 0 0 0.75rem;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.answer-p:last-child {
+  margin-bottom: 0;
 }
 
 @keyframes rise {

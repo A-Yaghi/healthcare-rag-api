@@ -30,6 +30,14 @@ function escapeHtml(text) {
     .replaceAll(">", "&gt;");
 }
 
+function formatAnswer(text) {
+  // Preserve full answer text; render paragraphs instead of clipping.
+  return escapeHtml(text)
+    .split(/\n{2,}/)
+    .map((para) => `<p class="answer-p">${para.replaceAll("\n", "<br>")}</p>`)
+    .join("");
+}
+
 function renderSources(sources) {
   if (!sources?.length) return "";
   const items = sources
@@ -58,7 +66,11 @@ function appendMessage(role, content, sources = null, meta = null) {
   const metaLine = meta
     ? `<div class="label">${label} · ${meta}</div>`
     : `<div class="label">${label}</div>`;
-  div.innerHTML = `${metaLine}<div>${escapeHtml(content)}</div>${
+  const body =
+    role === "assistant"
+      ? `<div class="answer-body">${formatAnswer(content)}</div>`
+      : `<div>${escapeHtml(content)}</div>`;
+  div.innerHTML = `${metaLine}${body}${
     role === "assistant" ? renderSources(sources) : ""
   }`;
   chatEl.appendChild(div);

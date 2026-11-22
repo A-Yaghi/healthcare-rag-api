@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 
 from app.config import Settings
-from app.rag.documents import load_knowledge_chunks
+from app.rag.documents import knowledge_fingerprint, load_knowledge_chunks
 from app.rag.embeddings import (
     EmbeddingBackend,
     HashEmbeddingBackend,
@@ -149,17 +149,29 @@ def build_or_load_store(
     chunks_file = index_dir / "chunks.json"
     meta_file = index_dir / "meta.json"
 
+    knowledge_dir = Path(settings.knowledge_dir)
+    fingerprint = knowledge_fingerprint(knowledge_dir)
+
     if not rebuild and index_file.exists() and chunks_file.exists() and meta_file.exists():
         meta = json.loads(meta_file.read_text(encoding="utf-8"))
-        if meta.get("embedder") == embedder_name:
+        if (
+            meta.get("embedder") == embedder_name
+            and meta.get("knowledge_fingerprint") == fingerprint
+        ):
             return FaissStore.load(index_dir)
 
-    chunks = load_knowledge_chunks(Path(settings.knowledge_dir))
+    chunks = load_knowledge_chunks(knowledge_dir)
     vectors = embedder.embed([c.text for c in chunks])
     store = FaissStore.build(np.asarray(vectors, dtype=np.float32), chunks)
     store.save(index_dir)
     meta_file.write_text(
-        json.dumps({"embedder": embedder_name}, indent=2),
+        json.dumps(
+            {
+                "embedder": embedder_name,
+                "knowledge_fingerprint": fingerprint,
+            },
+            indent=2,
+        ),
         encoding="utf-8",
     )
     return store

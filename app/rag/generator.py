@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import Protocol
 
-from app.rag.documents import Chunk
+from app.rag.documents import Chunk, split_sentences
 
 
 class AnswerGenerator(Protocol):
@@ -14,22 +14,15 @@ def _cite(chunk: Chunk) -> str:
     return chunk.source or chunk.title or chunk.doc_id
 
 
-def _truncate(text: str, max_chars: int) -> str:
-    cleaned = " ".join(text.split())
-    if len(cleaned) <= max_chars:
-        return cleaned
-    return cleaned[: max_chars - 1].rsplit(" ", 1)[0] + "…"
-
-
 def _is_weak_answer(text: str) -> bool:
     cleaned = text.strip()
     if len(cleaned) < 80:
         return True
     words = re.findall(r"[A-Za-z0-9']+", cleaned)
-    if len(words) < 14:
+    if len(words) < 18:
         return True
-    # Single short clause with no structure is usually a FLAN-T5 under-answer
-    if "\n" not in cleaned and len(words) < 25 and "," not in cleaned:
+    # Tiny one-liners without punctuation are usually FLAN-T5 collapses.
+    if cleaned.count(".") == 0 and len(words) < 30:
         return True
     return False
 
@@ -51,8 +44,75 @@ def _wants_pros_cons(question: str) -> bool:
     return any(cue in q for cue in cues)
 
 
-class ExtractiveGenerator:
-    """Compose a grounded answer from retrieved chunks (no LLM download)."""
+def _unique_sentences(contexts: list[Chunk]) -> list[tuple[str, str]]:
+    seen: set[str] = set()
+    ordered: list[tuple[str, str]] = []
+    for chunk in contexts:
+        for sentence in split_sentences(chunk.text):
+            key = sentence.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            ordered.append((_cite(chunk), sentence))
+    return ordered
+
+
+def _classify_sentence(sentence: str) -> str:
+    lower = sentence.lower()
+    benefit_cues = (
+        "benefit",
+        "improve",
+        "assist",
+        "support",
+        "promise",
+        "help",
+        "reduce",
+        "enable",
+        "useful",
+        "potential applications",
+    )
+    risk_cues = (
+        "risk",
+        "bias",
+        "hallucin",
+        "privacy",
+        "inaccurate",
+        "harm",
+        "challenge",
+        "limitation",
+        "false",
+        "threat",
+        "concern",
+    )
+    bscore = sum(1 for cue in benefit_cues if cue in lower)
+    rscore = sum(1 for cue in risk_cues if cue in lower)
+    if bscore and rscore:
+        return "risk" if rscore >= bscore else "benefit"
+    if bscore:
+        return "benefit"
+    if rscore:
+        return "risk"
+    return "other"
+
+
+def _join_sentences(items: list[str], limit: int = 6) -> str:
+    chosen = items[:limit]
+    if not chosen:
+        return ""
+    return " ".join(chosen)
+
+
+def _lowercase_lead(text: str) -> str:
+    if not text:
+        return text
+    # Keep acronyms like WHO at the start.
+    if text[:3].isupper() and len(text) > 3 and text[3] in {" ", "'", ","}:
+        return text
+    return text[0].lower() + text[1:]
+
+
+class NarrativeGenerator:
+    """Natural-language fallback that uses full sentences (no ellipsis clipping)."""
 
     def generate(self, question: str, contexts: list[Chunk]) -> str:
         if not contexts:
@@ -61,79 +121,52 @@ class ExtractiveGenerator:
                 f"for: {question}"
             )
 
+        citations = "; ".join(sorted({_cite(c) for c in contexts}))
+        pairs = _unique_sentences(contexts)
+
         if _wants_pros_cons(question):
-            return self._pros_cons_answer(question, contexts)
+            benefits = [s for _, s in pairs if _classify_sentence(s) == "benefit"]
+            risks = [s for _, s in pairs if _classify_sentence(s) == "risk"]
+            other = [s for _, s in pairs if _classify_sentence(s) == "other"]
 
-        bullets = "\n".join(f"- ({_cite(c)}) {_truncate(c.text, 320)}" for c in contexts)
-        citations = "; ".join(sorted({_cite(c) for c in contexts}))
+            benefit_text = _join_sentences(benefits) or _join_sentences(other, 3)
+            risk_text = (
+                _join_sentences(risks)
+                or _join_sentences(other[3:], 3)
+                or _join_sentences(other, 2)
+            )
+
+            answer = (
+                f"Drawing only on the indexed sources, here is a concise take on "
+                f"{question.rstrip('?')}.\n\n"
+                f"On the positive side, {_lowercase_lead(benefit_text)}\n\n"
+                f"On the risk side, {_lowercase_lead(risk_text)}"
+            )
+            return f"{answer}\n\nSources: {citations}"
+
+        overview = _join_sentences([s for _, s in pairs], limit=8)
+        orgs = sorted({_cite(c) for c in contexts})
+        org_phrase = ", ".join(orgs)
         return (
-            f"Based on the indexed open digital-health sources, here is the most "
-            f"relevant evidence for '{question}':\n{bullets}\n\nSources: {citations}"
+            f"Based on {org_phrase}, {_lowercase_lead(overview)}\n\n"
+            f"Sources: {citations}"
         )
 
-    def _pros_cons_answer(self, question: str, contexts: list[Chunk]) -> str:
-        benefit_cues = (
-            "benefit",
-            "improve",
-            "assist",
-            "support",
-            "promise",
-            "help",
-            "reduce",
-            "enable",
-        )
-        risk_cues = (
-            "risk",
-            "bias",
-            "hallucin",
-            "privacy",
-            "inaccurate",
-            "harm",
-            "challenge",
-            "limitation",
-            "false",
-            "threat",
-        )
 
-        benefits: list[str] = []
-        risks: list[str] = []
-        other: list[str] = []
+class ExtractiveGenerator:
+    """Offline/CI generator — full chunk text, no ellipsis truncation."""
 
-        for chunk in contexts:
-            snippet = _truncate(chunk.text, 260)
-            line = f"- ({_cite(chunk)}) {snippet}"
-            lower = chunk.text.lower()
-            has_benefit = any(cue in lower for cue in benefit_cues)
-            has_risk = any(cue in lower for cue in risk_cues)
-            if has_benefit and not has_risk:
-                benefits.append(line)
-            elif has_risk and not has_benefit:
-                risks.append(line)
-            elif has_benefit and has_risk:
-                benefits.append(line)
-                risks.append(line)
-            else:
-                other.append(line)
+    def __init__(self) -> None:
+        self._narrative = NarrativeGenerator()
 
-        parts = [
-            f"Here is a corpus-grounded summary for '{question}':",
-            "",
-            "Potential benefits / positive uses:",
-        ]
-        parts.extend(benefits or other[:1] or ["- Not enough benefit-focused evidence in the top matches."])
-        parts.extend(["", "Potential risks / negatives:"])
-        parts.extend(risks or other[1:2] or other[:1] or ["- Not enough risk-focused evidence in the top matches."])
-        if other and (benefits or risks):
-            parts.extend(["", "Additional context:"])
-            parts.extend(other[:2])
-
-        citations = "; ".join(sorted({_cite(c) for c in contexts}))
-        parts.extend(["", f"Sources: {citations}"])
-        return "\n".join(parts)
+    def generate(self, question: str, contexts: list[Chunk]) -> str:
+        return self._narrative.generate(question, contexts)
 
 
 class FlanT5Generator:
-    def __init__(self, model_name: str, max_new_tokens: int = 256) -> None:
+    """Small grounded LLM layer: rewrite retrieved evidence into natural prose."""
+
+    def __init__(self, model_name: str, max_new_tokens: int = 320) -> None:
         from transformers import pipeline
 
         self._pipe = pipeline(
@@ -143,6 +176,32 @@ class FlanT5Generator:
             max_new_tokens=max_new_tokens,
         )
         self.model_name = model_name
+        self._tokenizer = self._pipe.tokenizer
+
+    def _fit_context(self, question: str, contexts: list[Chunk], instruction: str) -> str:
+        """Pack as many full sentences as fit in the model context window."""
+        reserve = instruction + f"\n\nContext:\n\n\nQuestion: {question}\nAnswer:"
+        reserve_ids = self._tokenizer.encode(reserve, add_special_tokens=True)
+        # FLAN-T5 practical limit is 512 tokens; leave room for generation prefix.
+        budget = max(128, 480 - len(reserve_ids))
+
+        pieces: list[str] = []
+        used = 0
+        for cite, sentence in _unique_sentences(contexts):
+            candidate = f"[{cite}] {sentence}"
+            token_len = len(
+                self._tokenizer.encode(candidate + "\n", add_special_tokens=False)
+            )
+            if pieces and used + token_len > budget:
+                break
+            if not pieces and token_len > budget:
+                # Extremely long sentence: keep a token-safe prefix ending on a space.
+                ids = self._tokenizer.encode(candidate, add_special_tokens=False)[:budget]
+                pieces.append(self._tokenizer.decode(ids, skip_special_tokens=True))
+                break
+            pieces.append(candidate)
+            used += token_len
+        return "\n".join(pieces)
 
     def generate(self, question: str, contexts: list[Chunk]) -> str:
         if not contexts:
@@ -151,48 +210,48 @@ class FlanT5Generator:
                 f"for: {question}"
             )
 
-        # Keep prompts inside FLAN-T5's practical input budget.
-        context_block = "\n".join(
-            f"[{_cite(c)}] {_truncate(c.text, 220)}" for c in contexts[:4]
-        )
-
         if _wants_pros_cons(question):
-            prompt = (
-                "Using only the context, write a clear answer with two sections: "
-                "Benefits and Risks/Negatives. Use short bullet points. "
-                "If something is missing from the context, say so.\n\n"
-                f"Context:\n{context_block}\n\n"
-                f"Question: {question}\nAnswer:"
+            instruction = (
+                "You are a helpful assistant. Using ONLY the context, write a natural "
+                "conversational answer with two short paragraphs: (1) benefits/positive "
+                "uses and (2) risks/negatives. Do not copy the context verbatim. "
+                "Do not use ellipses. If evidence is missing, say so briefly."
             )
         else:
-            prompt = (
-                "Using only the context, write a helpful multi-sentence answer. "
-                "Include the key points. If the answer is not in the context, "
-                "say you do not know.\n\n"
-                f"Context:\n{context_block}\n\n"
-                f"Question: {question}\nAnswer:"
+            instruction = (
+                "You are a helpful assistant. Using ONLY the context, write a natural "
+                "conversational answer in 2-5 complete sentences. Synthesize the key "
+                "points in plain language. Do not copy the context verbatim. "
+                "Do not use ellipses. If the answer is not in the context, say you do not know."
             )
 
+        context_block = self._fit_context(question, contexts, instruction)
+        prompt = (
+            f"{instruction}\n\nContext:\n{context_block}\n\n"
+            f"Question: {question}\nAnswer:"
+        )
         result = self._pipe(prompt)[0]["generated_text"].strip()
         return result
 
 
 class HybridGenerator:
-    """FLAN-T5 first; fall back to structured extractive answers when output is weak."""
+    """Grounded LLM synthesis with natural-language fallback (never ellipsis clips)."""
 
     def __init__(self, llm: FlanT5Generator) -> None:
         self.llm = llm
-        self.extractive = ExtractiveGenerator()
+        self.narrative = NarrativeGenerator()
 
     def generate(self, question: str, contexts: list[Chunk]) -> str:
         if not contexts:
-            return self.extractive.generate(question, contexts)
+            return self.narrative.generate(question, contexts)
 
         llm_answer = self.llm.generate(question, contexts)
         citations = "; ".join(sorted({_cite(c) for c in contexts}))
 
-        if _is_weak_answer(llm_answer):
-            return self.extractive.generate(question, contexts)
+        # Prefer LLM prose; if it under-answers, use narrative synthesis instead of
+        # dumping webpage-like truncated snippets.
+        if _is_weak_answer(llm_answer) or "…" in llm_answer or "..." in llm_answer:
+            return self.narrative.generate(question, contexts)
 
         if "Sources:" not in llm_answer and citations:
             return f"{llm_answer}\n\nSources: {citations}"
