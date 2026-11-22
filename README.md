@@ -1,10 +1,11 @@
 # Healthcare RAG API
 
-Production-style Retrieval-Augmented Generation (RAG) service for digital-health Q&A.
+Production-style RAG service for digital-health Q&A.
 
-Built as a portfolio project for **AI Engineer / Software Engineer** roles: typed FastAPI endpoints, API-key auth, FAISS vector search, Docker packaging, GitHub Actions CI, and latency metrics.
+Built as a personal portfolio project to practice FastAPI and RAG in the healthcare domain : typed FastAPI endpoints, API-key auth, FAISS vector search, Docker packaging, GitHub Actions CI, and latency metrics.
 
 > Demo corpus only — educational digital-health notes, not clinical advice and not real patient data.
+> Created in part using Claude Code
 
 ## Architecture
 
@@ -133,7 +134,7 @@ docker-compose.yml
 .github/workflows/ci.yml
 ```
 
-## CV / LinkedIn blurb
+## blurb
 
 > Built a production-style Healthcare RAG API with FastAPI, FAISS, Sentence Transformers, Docker, and GitHub Actions — including API-key auth, source citations, and latency metrics.
 
