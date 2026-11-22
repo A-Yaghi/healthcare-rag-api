@@ -21,6 +21,7 @@ from app.rag.generator import (
     HybridGenerator,
 )
 from app.rag.documents import Chunk
+from app.rag.normalize import QueryNormalizer, build_normalizer_from_chunks
 from app.rag.retrieve import extra_search_queries, rerank_hits
 from app.rag.store import FaissStore
 from app.schemas import ChatMessage, ChatResponse, QueryResponse, SourceChunk
@@ -36,6 +37,7 @@ class RAGPipeline:
         default_top_k: int,
         embedding_model: str,
         generator_model: str | None,
+        normalizer: QueryNormalizer | None = None,
     ) -> None:
         self.store = store
         self.embedder = embedder
@@ -44,6 +46,7 @@ class RAGPipeline:
         self.default_top_k = default_top_k
         self.embedding_model = embedding_model
         self.generator_model = generator_model
+        self.normalizer = normalizer or build_normalizer_from_chunks(store.chunks)
 
     @property
     def indexed_chunks(self) -> int:
@@ -65,13 +68,24 @@ class RAGPipeline:
         raw_hits = list(merged.values())
         return rerank_hits(question, raw_hits, top_k=top_k)
 
+    def _normalize_payload(self, original: str, corrected: str, corrections: dict[str, str]):
+        changed = corrected.lower() != original.lower() or bool(corrections)
+        return (
+            corrected if changed else None,
+            corrections or None,
+        )
+
     def query(self, question: str, top_k: int | None = None) -> QueryResponse:
         started = time.perf_counter()
         k = top_k or self.default_top_k
-        hits = self._retrieve(question, k)
+        normalized = self.normalizer.normalize(question)
+        hits = self._retrieve(normalized.search_text, k)
         contexts = [chunk for chunk, _ in hits]
-        answer = self.generator.generate(question, contexts)
+        answer = self.generator.generate(normalized.corrected, contexts)
         latency_ms = (time.perf_counter() - started) * 1000
+        normalized_question, corrections = self._normalize_payload(
+            question, normalized.corrected, normalized.corrections
+        )
 
         sources = [
             SourceChunk(
@@ -92,6 +106,8 @@ class RAGPipeline:
             latency_ms=round(latency_ms, 2),
             embedding_model=self.embedding_model,
             generator_model=self.generator_model,
+            normalized_question=normalized_question,
+            corrections=corrections,
         )
 
     def chat(
@@ -111,10 +127,15 @@ class RAGPipeline:
 
         started = time.perf_counter()
         k = top_k or self.default_top_k
-        hits = self._retrieve(search_question, k)
+        norm_search = self.normalizer.normalize(search_question)
+        norm_latest = self.normalizer.normalize(latest_user)
+        hits = self._retrieve(norm_search.search_text, k)
         contexts = [chunk for chunk, _ in hits]
-        answer = self.generator.generate(latest_user, contexts)
+        answer = self.generator.generate(norm_latest.corrected, contexts)
         latency_ms = (time.perf_counter() - started) * 1000
+        normalized_question, corrections = self._normalize_payload(
+            latest_user, norm_latest.corrected, norm_latest.corrections
+        )
 
         sources = [
             SourceChunk(
@@ -135,7 +156,9 @@ class RAGPipeline:
             latency_ms=round(latency_ms, 2),
             embedding_model=self.embedding_model,
             generator_model=self.generator_model,
-            search_question=search_question,
+            search_question=norm_search.search_text,
+            normalized_question=normalized_question,
+            corrections=corrections,
         )
 
 
@@ -216,4 +239,5 @@ def create_pipeline(settings: Settings, offline: bool | None = None) -> RAGPipel
         default_top_k=settings.top_k,
         embedding_model=embedder_name,
         generator_model=generator_model,
+        normalizer=build_normalizer_from_chunks(store.chunks),
     )

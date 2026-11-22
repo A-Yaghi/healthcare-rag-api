@@ -59,7 +59,25 @@ function renderSources(sources) {
   return `<div class="sources">${items}</div>`;
 }
 
-function appendMessage(role, content, sources = null, meta = null) {
+function renderNormalization(data) {
+  if (!data?.normalized_question && !data?.corrections) return "";
+  const parts = [];
+  if (data.corrections && Object.keys(data.corrections).length) {
+    const fixes = Object.entries(data.corrections)
+      .map(
+        ([from, to]) =>
+          `<code>${escapeHtml(from)}</code> → <code>${escapeHtml(to)}</code>`
+      )
+      .join(", ");
+    parts.push(`Corrected: ${fixes}`);
+  }
+  if (data.normalized_question) {
+    parts.push(`Searched as: ${escapeHtml(data.normalized_question)}`);
+  }
+  return `<div class="normalize-note">${parts.join(" · ")}</div>`;
+}
+
+function appendMessage(role, content, sources = null, meta = null, data = null) {
   const div = document.createElement("div");
   div.className = `msg ${role}`;
   const label = role === "user" ? "You" : "Assistant";
@@ -70,7 +88,9 @@ function appendMessage(role, content, sources = null, meta = null) {
     role === "assistant"
       ? `<div class="answer-body">${formatAnswer(content)}</div>`
       : `<div>${escapeHtml(content)}</div>`;
-  div.innerHTML = `${metaLine}${body}${
+  const normalizeNote =
+    role === "assistant" ? renderNormalization(data) : "";
+  div.innerHTML = `${metaLine}${body}${normalizeNote}${
     role === "assistant" ? renderSources(sources) : ""
   }`;
   chatEl.appendChild(div);
@@ -122,7 +142,7 @@ async function sendQuestion(question) {
     const data = await res.json();
     messages.push({ role: "assistant", content: data.answer });
     const meta = `${Math.round(data.latency_ms)} ms · ${data.generation_mode}`;
-    appendMessage("assistant", data.answer, data.sources, meta);
+    appendMessage("assistant", data.answer, data.sources, meta, data);
     setStatus("");
   } catch (err) {
     messages.pop();

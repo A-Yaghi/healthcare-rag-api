@@ -76,6 +76,7 @@ Open [http://127.0.0.1:8000/](http://127.0.0.1:8000/) for a corpus-grounded chat
 
 - `POST /v1/query` — grounded answers with source title, organisation, licence, and URL
 - `POST /v1/chat` — chat-style RAG with light history-aware retrieval
+- Query normalisation: corpus-aware spell correction + synonym expansion before retrieval (returns `normalized_question` / `corrections` when applied)
 - Grounded LLM layer: FLAN-T5 rewrites retrieved evidence into natural prose; narrative fallback uses full sentences (no ellipsis clipping)
 - `GET /health` — liveness + index size + active models
 - `GET /metrics` — request count, avg / p95 latency (API key required)

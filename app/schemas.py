@@ -27,6 +27,8 @@ class QueryResponse(BaseModel):
     latency_ms: float
     embedding_model: str
     generator_model: str | None = None
+    normalized_question: str | None = None
+    corrections: dict[str, str] | None = None
 
 
 class ChatMessage(BaseModel):
@@ -47,6 +49,8 @@ class ChatResponse(BaseModel):
     embedding_model: str
     generator_model: str | None = None
     search_question: str
+    normalized_question: str | None = None
+    corrections: dict[str, str] | None = None
 
 
 class HealthResponse(BaseModel):

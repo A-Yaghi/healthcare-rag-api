@@ -21,7 +21,7 @@ _COMMON_DOMAIN = {
     "safe", "safety",
 }
 
-_SYNONYMS = {
+SYNONYMS = {
     "benefits": {"benefit", "advantages", "positive", "improve", "help"},
     "benefit": {"benefits", "advantages", "positive", "improve", "help"},
     "negatives": {"negative", "risks", "risk", "harms", "drawbacks", "challenges"},
@@ -43,6 +43,13 @@ _SYNONYMS = {
     "mammograms": {"mammogram", "mammography", "mammographies", "screening"},
     "safe": {"safety", "risk", "harm", "harms", "radiation", "benefit"},
     "safety": {"safe", "risk", "harm", "harms", "radiation", "benefit"},
+    "consent": {"permission", "authorization", "privacy", "gdpr"},
+    "ethics": {"ethical", "principles", "governance", "responsible"},
+    "ethical": {"ethics", "principles", "governance", "responsible"},
+    "advantages": {"benefits", "benefit", "positive", "improve"},
+    "drawbacks": {"risks", "negatives", "harms", "challenges"},
+    "tomosynthesis": {"mammogram", "mammography", "3d", "imaging"},
+    "ultrasound": {"sonography", "imaging", "breast"},
 }
 
 _PRIVACY_QUESTION_CUES = (
@@ -112,7 +119,7 @@ def tokenize(text: str) -> set[str]:
 def expand_tokens(tokens: set[str]) -> set[str]:
     expanded = set(tokens)
     for token in tokens:
-        expanded.update(_SYNONYMS.get(token, set()))
+        expanded.update(SYNONYMS.get(token, set()))
     return expanded
 
 

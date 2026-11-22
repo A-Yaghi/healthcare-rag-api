@@ -9,6 +9,7 @@ from app.rag.documents import load_knowledge_chunks
 from app.rag.embeddings import HashEmbeddingBackend
 from app.rag.chat import build_search_question
 from app.rag.generator import ExtractiveGenerator, _is_weak_answer
+from app.rag.normalize import QueryNormalizer, build_normalizer_from_chunks
 from app.rag.pipeline import RAGPipeline, build_or_load_store
 from app.schemas import ChatMessage
 
@@ -231,3 +232,32 @@ def test_pipeline_offline(settings: Settings) -> None:
     assert result.sources
     assert any(s.source for s in result.sources)
     assert "WHO" in result.answer or "autonomy" in result.answer.lower()
+
+
+def test_query_normalizer_fixes_misspellings(settings: Settings) -> None:
+    chunks = load_knowledge_chunks(settings.knowledge_dir)
+    normalizer = build_normalizer_from_chunks(chunks)
+    result = normalizer.normalize("Are mamografies safe for screening?")
+    assert "mammograph" in result.corrected.lower() or "mammogram" in result.corrected.lower()
+    assert result.corrections
+    assert any("mamograf" in k.lower() for k in result.corrections)
+
+
+def test_query_normalizer_expands_synonyms() -> None:
+    normalizer = QueryNormalizer({"mammogram", "mammography", "screening", "benefits", "risks"})
+    result = normalizer.normalize("What are the benefits of mammography screening?")
+    assert "benefit" in result.search_text.lower() or "advantage" in result.search_text.lower()
+    assert result.search_text != result.corrected or "advantage" in result.search_text.lower()
+
+
+def test_misspelled_query_returns_corrections(client: TestClient) -> None:
+    response = client.post(
+        "/v1/query",
+        json={"question": "Are mamografies safe?"},
+        headers={"X-API-Key": "test-key"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["sources"]
+    assert body.get("corrections") or body.get("normalized_question")
+    assert "don't know" not in body["answer"].lower()

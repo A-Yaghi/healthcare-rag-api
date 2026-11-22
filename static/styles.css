@@ -187,6 +187,19 @@ body {
   margin-bottom: 0;
 }
 
+.normalize-note {
+  margin-top: 0.65rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.normalize-note code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.8rem;
+  color: var(--accent-2);
+}
+
 @keyframes rise {
   from {
     opacity: 0;
