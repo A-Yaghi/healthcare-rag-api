@@ -18,6 +18,7 @@ RUN pip install --upgrade pip && pip install -r requirements.txt
 COPY app ./app
 COPY data ./data
 COPY scripts ./scripts
+COPY static ./static
 
 EXPOSE 8000
 

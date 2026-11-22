@@ -13,9 +13,15 @@ from app.rag.embeddings import (
     HashEmbeddingBackend,
     SentenceTransformerBackend,
 )
-from app.rag.generator import AnswerGenerator, ExtractiveGenerator, FlanT5Generator
+from app.rag.chat import build_search_question
+from app.rag.generator import (
+    AnswerGenerator,
+    ExtractiveGenerator,
+    FlanT5Generator,
+    HybridGenerator,
+)
 from app.rag.store import FaissStore
-from app.schemas import QueryResponse, SourceChunk
+from app.schemas import ChatMessage, ChatResponse, QueryResponse, SourceChunk
 
 
 class RAGPipeline:
@@ -71,6 +77,51 @@ class RAGPipeline:
             generator_model=self.generator_model,
         )
 
+    def chat(
+        self,
+        messages: list[ChatMessage],
+        top_k: int | None = None,
+    ) -> ChatResponse:
+        search_question = build_search_question(messages)
+        if not search_question:
+            raise ValueError("Chat requires at least one user message")
+
+        latest_user = next(
+            m.content.strip()
+            for m in reversed(messages)
+            if m.role == "user" and m.content.strip()
+        )
+
+        started = time.perf_counter()
+        k = top_k or self.default_top_k
+        query_vec = self.embedder.embed([search_question])
+        hits = self.store.search(query_vec, k)
+        contexts = [chunk for chunk, _ in hits]
+        answer = self.generator.generate(latest_user, contexts)
+        latency_ms = (time.perf_counter() - started) * 1000
+
+        sources = [
+            SourceChunk(
+                doc_id=chunk.doc_id,
+                title=chunk.title,
+                text=chunk.text,
+                score=round(score, 4),
+                source=chunk.source,
+                license=chunk.license,
+                url=chunk.url,
+            )
+            for chunk, score in hits
+        ]
+        return ChatResponse(
+            answer=answer,
+            sources=sources,
+            generation_mode=self.generation_mode,
+            latency_ms=round(latency_ms, 2),
+            embedding_model=self.embedding_model,
+            generator_model=self.generator_model,
+            search_question=search_question,
+        )
+
 
 def _build_embedder(settings: Settings, offline: bool) -> EmbeddingBackend:
     if offline:
@@ -83,7 +134,7 @@ def _build_generator(settings: Settings, offline: bool) -> AnswerGenerator:
     if offline or mode == "retrieve":
         return ExtractiveGenerator()
     if mode == "generate":
-        return FlanT5Generator(settings.generator_model)
+        return HybridGenerator(FlanT5Generator(settings.generator_model))
     raise ValueError("GENERATION_MODE must be 'retrieve' or 'generate'")
 
 

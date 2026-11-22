@@ -10,7 +10,7 @@ services:
       GENERATION_MODE: generate
       OFFLINE_EMBEDDINGS: "false"
       EMBEDDING_MODEL: sentence-transformers/all-MiniLM-L6-v2
-      TOP_K: 3
+      TOP_K: 4
       INDEX_DIR: /app/data/index
       KNOWLEDGE_DIR: /app/data/knowledge
     volumes:

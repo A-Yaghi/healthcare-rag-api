@@ -7,8 +7,10 @@ from app.config import Settings
 from app.main import create_app
 from app.rag.documents import load_knowledge_chunks
 from app.rag.embeddings import HashEmbeddingBackend
-from app.rag.generator import ExtractiveGenerator
+from app.rag.chat import build_search_question
+from app.rag.generator import ExtractiveGenerator, _is_weak_answer
 from app.rag.pipeline import RAGPipeline, build_or_load_store
+from app.schemas import ChatMessage
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -90,6 +92,62 @@ def test_knowledge_has_source_metadata(settings: Settings) -> None:
     assert any(c.source for c in chunks)
     assert any("WHO" in c.source for c in chunks)
     assert any(c.url.startswith("http") for c in chunks)
+
+
+def test_chat_endpoint(client: TestClient) -> None:
+    response = client.post(
+        "/v1/chat",
+        json={
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "What are the benefits and negatives of using AI in the healthcare field?",
+                }
+            ]
+        },
+        headers={"X-API-Key": "test-key"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert "benefit" in body["answer"].lower() or "risk" in body["answer"].lower()
+    assert body["sources"]
+    assert body["search_question"]
+
+
+def test_chat_ui_served(client: TestClient) -> None:
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "Healthcare RAG Chat" in response.text
+
+
+def test_search_question_uses_history() -> None:
+    question = build_search_question(
+        [
+            ChatMessage(role="user", content="Tell me about mammograms"),
+            ChatMessage(role="assistant", content="A mammogram is an x-ray..."),
+            ChatMessage(role="user", content="What about microcalcifications?"),
+        ]
+    )
+    assert "microcalcifications" in question.lower()
+    assert "mammograms" in question.lower()
+
+
+def test_weak_answer_detection() -> None:
+    assert _is_weak_answer("protect autonomy")
+    assert not _is_weak_answer(
+        "AI can improve diagnosis and treatment, but it also introduces risks "
+        "such as bias, privacy concerns, and inaccurate outputs that need governance."
+    )
+
+
+def test_extractive_pros_cons(settings: Settings) -> None:
+    chunks = load_knowledge_chunks(settings.knowledge_dir)
+    answer = ExtractiveGenerator().generate(
+        "What are the benefits and negatives of using AI in the healthcare field?",
+        chunks[:4],
+    )
+    assert "Potential benefits" in answer
+    assert "Potential risks" in answer
 
 
 def test_pipeline_offline(settings: Settings) -> None:

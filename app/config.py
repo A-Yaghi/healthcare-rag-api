@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     generation_mode: str = "retrieve"
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     generator_model: str = "google/flan-t5-small"
-    top_k: int = 3
+    top_k: int = 4
 
     index_dir: Path = ROOT_DIR / "data" / "index"
     knowledge_dir: Path = ROOT_DIR / "data" / "knowledge"
