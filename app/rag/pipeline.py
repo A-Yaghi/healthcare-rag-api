@@ -20,6 +20,7 @@ from app.rag.generator import (
     FlanT5Generator,
     HybridGenerator,
 )
+from app.rag.retrieve import rerank_hits
 from app.rag.store import FaissStore
 from app.schemas import ChatMessage, ChatResponse, QueryResponse, SourceChunk
 
@@ -47,11 +48,17 @@ class RAGPipeline:
     def indexed_chunks(self) -> int:
         return self.store.size
 
+    def _retrieve(self, question: str, top_k: int) -> list[tuple[object, float]]:
+        # Over-fetch then rerank so different questions don't collapse to the same docs.
+        candidate_k = min(max(top_k * 4, top_k), max(self.store.size, top_k))
+        query_vec = self.embedder.embed([question])
+        raw_hits = self.store.search(query_vec, candidate_k)
+        return rerank_hits(question, raw_hits, top_k=top_k)
+
     def query(self, question: str, top_k: int | None = None) -> QueryResponse:
         started = time.perf_counter()
         k = top_k or self.default_top_k
-        query_vec = self.embedder.embed([question])
-        hits = self.store.search(query_vec, k)
+        hits = self._retrieve(question, k)
         contexts = [chunk for chunk, _ in hits]
         answer = self.generator.generate(question, contexts)
         latency_ms = (time.perf_counter() - started) * 1000
@@ -94,8 +101,7 @@ class RAGPipeline:
 
         started = time.perf_counter()
         k = top_k or self.default_top_k
-        query_vec = self.embedder.embed([search_question])
-        hits = self.store.search(query_vec, k)
+        hits = self._retrieve(search_question, k)
         contexts = [chunk for chunk, _ in hits]
         answer = self.generator.generate(latest_user, contexts)
         latency_ms = (time.perf_counter() - started) * 1000

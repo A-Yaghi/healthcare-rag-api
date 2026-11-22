@@ -120,7 +120,7 @@ def test_chat_ui_served(client: TestClient) -> None:
     assert "Healthcare RAG Chat" in response.text
 
 
-def test_search_question_uses_history() -> None:
+def test_search_question_uses_history_for_short_followups() -> None:
     question = build_search_question(
         [
             ChatMessage(role="user", content="Tell me about mammograms"),
@@ -132,6 +132,24 @@ def test_search_question_uses_history() -> None:
     assert "mammograms" in question.lower()
 
 
+def test_search_question_ignores_history_for_new_full_questions() -> None:
+    question = build_search_question(
+        [
+            ChatMessage(
+                role="user",
+                content="What are the current regulations for using AI with medical imaging",
+            ),
+            ChatMessage(role="assistant", content="..."),
+            ChatMessage(
+                role="user",
+                content="Are the ai regulations in the US and the EU different?",
+            ),
+        ]
+    )
+    assert question == "Are the ai regulations in the US and the EU different?"
+    assert "medical imaging" not in question.lower()
+
+
 def test_weak_answer_detection() -> None:
     assert _is_weak_answer("protect autonomy")
     assert not _is_weak_answer(
@@ -141,10 +159,14 @@ def test_weak_answer_detection() -> None:
 
 
 def test_extractive_pros_cons(settings: Settings) -> None:
-    chunks = load_knowledge_chunks(settings.knowledge_dir)
+    chunks = [
+        c
+        for c in load_knowledge_chunks(settings.knowledge_dir)
+        if "benefit" in c.text.lower() or "risk" in c.text.lower()
+    ][:4]
     answer = ExtractiveGenerator().generate(
         "What are the benefits and negatives of using AI in the healthcare field?",
-        chunks[:4],
+        chunks,
     )
     assert "positive side" in answer.lower()
     assert "risk side" in answer.lower()

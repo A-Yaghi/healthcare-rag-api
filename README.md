@@ -20,8 +20,11 @@ Indexed documents are listed with licence notes in [`data/SOURCES.md`](data/SOUR
 | [WHO AI ethics guidance (2021)](https://www.who.int/publications/i/item/9789240029200) | Six consensus ethical principles for AI for health | **CC BY-NC-SA 3.0 IGO** |
 | [WHO LMM guidance (2024)](https://www.who.int/publications/i/item/9789240084759) | Large multi-modal models: benefits & risks | **CC BY-NC-SA 3.0 IGO** |
 | [WHO regulatory considerations (2023)](https://www.who.int/publications/i/item/9789240078871) | Documentation, validation, data quality, privacy | **CC BY-NC-SA 3.0 IGO** |
+| [FDA AI-enabled medical devices](https://www.fda.gov/medical-devices/artificial-intelligence-enabled-medical-devices/transparency-machine-learning-enabled-medical-devices-guiding-principles) | U.S. device-centered AI pathway | Public domain (U.S. government) |
+| [EU AI Act FAQ](https://digital-strategy.ec.europa.eu/en/faqs/navigating-ai-act) + MDCG MDR/AI Act interplay | EU horizontal AI Act + medical devices | EU public info with attribution |
+| US vs EU comparison note | Side-by-side differences for healthcare AI | Educational synthesis with attribution |
 
-Code is MIT. WHO excerpts remain CC BY-NC-SA 3.0 IGO (non-commercial, attribution, share-alike). No WHO/FDA endorsement is implied.
+Code is MIT. WHO excerpts remain CC BY-NC-SA 3.0 IGO (non-commercial, attribution, share-alike). No WHO/FDA/EU endorsement is implied.
 
 ## Architecture
 

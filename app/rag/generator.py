@@ -4,6 +4,7 @@ import re
 from typing import Protocol
 
 from app.rag.documents import Chunk, split_sentences
+from app.rag.retrieve import evidence_is_sufficient, lexical_overlap_score, tokenize
 
 
 class AnswerGenerator(Protocol):
@@ -21,7 +22,6 @@ def _is_weak_answer(text: str) -> bool:
     words = re.findall(r"[A-Za-z0-9']+", cleaned)
     if len(words) < 18:
         return True
-    # Tiny one-liners without punctuation are usually FLAN-T5 collapses.
     if cleaned.count(".") == 0 and len(words) < 30:
         return True
     return False
@@ -105,14 +105,35 @@ def _join_sentences(items: list[str], limit: int = 6) -> str:
 def _lowercase_lead(text: str) -> str:
     if not text:
         return text
-    # Keep acronyms like WHO at the start.
     if text[:3].isupper() and len(text) > 3 and text[3] in {" ", "'", ","}:
         return text
     return text[0].lower() + text[1:]
 
 
+def _relevant_sentences(question: str, contexts: list[Chunk], limit: int = 8) -> list[str]:
+    scored: list[tuple[float, str]] = []
+    for _, sentence in _unique_sentences(contexts):
+        score = lexical_overlap_score(question, sentence)
+        if score <= 0:
+            continue
+        scored.append((score, sentence))
+    scored.sort(key=lambda item: item[0], reverse=True)
+    return [sentence for _, sentence in scored[:limit]]
+
+
+def _insufficient_answer(question: str, contexts: list[Chunk]) -> str:
+    available = "; ".join(sorted({_cite(c) for c in contexts})) or "none"
+    return (
+        f"I do not have enough grounded evidence in the indexed corpus to answer "
+        f"this specifically: '{question}'. "
+        f"The closest retrieved sources were: {available}. "
+        f"Try asking about topics covered by the corpus (FDA device AI guidance, "
+        f"EU AI Act / MDR interplay, WHO AI ethics, mammography, or GMLP)."
+    )
+
+
 class NarrativeGenerator:
-    """Natural-language fallback that uses full sentences (no ellipsis clipping)."""
+    """Question-aware natural-language fallback using relevant full sentences."""
 
     def generate(self, question: str, contexts: list[Chunk]) -> str:
         if not contexts:
@@ -121,41 +142,40 @@ class NarrativeGenerator:
                 f"for: {question}"
             )
 
+        if not evidence_is_sufficient(question, contexts):
+            return _insufficient_answer(question, contexts)
+
         citations = "; ".join(sorted({_cite(c) for c in contexts}))
-        pairs = _unique_sentences(contexts)
+        relevant = _relevant_sentences(question, contexts, limit=8)
+        if len(relevant) < 2 and lexical_overlap_score(question, " ".join(relevant)) < 0.2:
+            return _insufficient_answer(question, contexts)
 
         if _wants_pros_cons(question):
-            benefits = [s for _, s in pairs if _classify_sentence(s) == "benefit"]
-            risks = [s for _, s in pairs if _classify_sentence(s) == "risk"]
-            other = [s for _, s in pairs if _classify_sentence(s) == "other"]
-
+            benefits = [s for s in relevant if _classify_sentence(s) == "benefit"]
+            risks = [s for s in relevant if _classify_sentence(s) == "risk"]
+            other = [s for s in relevant if _classify_sentence(s) == "other"]
             benefit_text = _join_sentences(benefits) or _join_sentences(other, 3)
             risk_text = (
                 _join_sentences(risks)
                 or _join_sentences(other[3:], 3)
                 or _join_sentences(other, 2)
             )
-
             answer = (
-                f"Drawing only on the indexed sources, here is a concise take on "
-                f"{question.rstrip('?')}.\n\n"
+                f"Drawing only on the indexed sources relevant to your question:\n\n"
                 f"On the positive side, {_lowercase_lead(benefit_text)}\n\n"
                 f"On the risk side, {_lowercase_lead(risk_text)}"
             )
             return f"{answer}\n\nSources: {citations}"
 
-        overview = _join_sentences([s for _, s in pairs], limit=8)
-        orgs = sorted({_cite(c) for c in contexts})
-        org_phrase = ", ".join(orgs)
+        overview = _join_sentences(relevant, limit=7)
         return (
-            f"Based on {org_phrase}, {_lowercase_lead(overview)}\n\n"
+            f"Here is what the indexed sources say that is most relevant to "
+            f"your question:\n\n{_lowercase_lead(overview)}\n\n"
             f"Sources: {citations}"
         )
 
 
 class ExtractiveGenerator:
-    """Offline/CI generator — full chunk text, no ellipsis truncation."""
-
     def __init__(self) -> None:
         self._narrative = NarrativeGenerator()
 
@@ -179,15 +199,22 @@ class FlanT5Generator:
         self._tokenizer = self._pipe.tokenizer
 
     def _fit_context(self, question: str, contexts: list[Chunk], instruction: str) -> str:
-        """Pack as many full sentences as fit in the model context window."""
         reserve = instruction + f"\n\nContext:\n\n\nQuestion: {question}\nAnswer:"
         reserve_ids = self._tokenizer.encode(reserve, add_special_tokens=True)
-        # FLAN-T5 practical limit is 512 tokens; leave room for generation prefix.
         budget = max(128, 480 - len(reserve_ids))
+
+        # Prefer sentences that overlap the question.
+        ranked = []
+        for cite, sentence in _unique_sentences(contexts):
+            score = lexical_overlap_score(question, sentence)
+            ranked.append((score, cite, sentence))
+        ranked.sort(key=lambda item: item[0], reverse=True)
 
         pieces: list[str] = []
         used = 0
-        for cite, sentence in _unique_sentences(contexts):
+        for score, cite, sentence in ranked:
+            if score <= 0 and pieces:
+                continue
             candidate = f"[{cite}] {sentence}"
             token_len = len(
                 self._tokenizer.encode(candidate + "\n", add_special_tokens=False)
@@ -195,7 +222,6 @@ class FlanT5Generator:
             if pieces and used + token_len > budget:
                 break
             if not pieces and token_len > budget:
-                # Extremely long sentence: keep a token-safe prefix ending on a space.
                 ids = self._tokenizer.encode(candidate, add_special_tokens=False)[:budget]
                 pieces.append(self._tokenizer.decode(ids, skip_special_tokens=True))
                 break
@@ -212,17 +238,17 @@ class FlanT5Generator:
 
         if _wants_pros_cons(question):
             instruction = (
-                "You are a helpful assistant. Using ONLY the context, write a natural "
-                "conversational answer with two short paragraphs: (1) benefits/positive "
-                "uses and (2) risks/negatives. Do not copy the context verbatim. "
-                "Do not use ellipses. If evidence is missing, say so briefly."
+                "You are a helpful assistant. Using ONLY the context, answer THIS "
+                "question with two short paragraphs: benefits and risks. "
+                "Ignore unrelated context. Do not copy the context verbatim."
             )
         else:
             instruction = (
-                "You are a helpful assistant. Using ONLY the context, write a natural "
-                "conversational answer in 2-5 complete sentences. Synthesize the key "
-                "points in plain language. Do not copy the context verbatim. "
-                "Do not use ellipses. If the answer is not in the context, say you do not know."
+                "You are a helpful assistant. Using ONLY the context, answer THIS "
+                "exact question in 2-5 complete sentences. Focus on the question's "
+                "specific entities (for example US vs EU, imaging, FDA, AI Act). "
+                "If the context does not answer the question, say you do not know. "
+                "Do not reuse a generic WHO summary unless it directly answers the question."
             )
 
         context_block = self._fit_context(question, contexts, instruction)
@@ -235,7 +261,7 @@ class FlanT5Generator:
 
 
 class HybridGenerator:
-    """Grounded LLM synthesis with natural-language fallback (never ellipsis clips)."""
+    """Grounded LLM synthesis with question-aware narrative fallback."""
 
     def __init__(self, llm: FlanT5Generator) -> None:
         self.llm = llm
@@ -245,12 +271,28 @@ class HybridGenerator:
         if not contexts:
             return self.narrative.generate(question, contexts)
 
+        if not evidence_is_sufficient(question, contexts):
+            return self.narrative.generate(question, contexts)
+
         llm_answer = self.llm.generate(question, contexts)
         citations = "; ".join(sorted({_cite(c) for c in contexts}))
+        q_terms = tokenize(question)
 
-        # Prefer LLM prose; if it under-answers, use narrative synthesis instead of
-        # dumping webpage-like truncated snippets.
-        if _is_weak_answer(llm_answer) or "…" in llm_answer or "..." in llm_answer:
+        # Reject LLM answers that ignore the question's key terms when those terms
+        # exist in the retrieved evidence (common failure mode: generic WHO dump).
+        answer_terms = tokenize(llm_answer)
+        important = {t for t in q_terms if len(t) > 3}
+        if important and llm_answer:
+            coverage = len(important & answer_terms) / len(important)
+        else:
+            coverage = 1.0
+
+        if (
+            _is_weak_answer(llm_answer)
+            or "…" in llm_answer
+            or "..." in llm_answer
+            or coverage < 0.2
+        ):
             return self.narrative.generate(question, contexts)
 
         if "Sources:" not in llm_answer and citations:
