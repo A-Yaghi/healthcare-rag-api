@@ -32,17 +32,25 @@ SYNONYMS = {
     "regulation": {"regulations", "regulatory", "law", "act", "guidance"},
     "eu": {"europe", "european", "aia", "mdr", "ivdr"},
     "us": {"usa", "united", "states", "fda", "american"},
-    "imaging": {"image", "radiology", "mammography", "mammogram", "medical"},
+    "imaging": {"image", "radiology", "radiography", "medical"},
     "freely": {"free", "unrestricted", "privacy", "consent", "protection", "gdpr"},
     "profitable": {"profit", "revenue", "commercial", "business", "money"},
     "privacy": {"protection", "confidential", "gdpr", "consent", "personal"},
-    "screening": {"mammogram", "mammography", "mammograms", "screen"},
-    "mammographies": {"mammography", "mammogram", "mammograms", "screening"},
-    "mammography": {"mammogram", "mammograms", "mammographies", "screening"},
-    "mammogram": {"mammography", "mammograms", "mammographies", "screening"},
-    "mammograms": {"mammogram", "mammography", "mammographies", "screening"},
-    "safe": {"safety", "risk", "harm", "harms", "radiation", "benefit"},
-    "safety": {"safe", "risk", "harm", "harms", "radiation", "benefit"},
+    # Keep screening generic — do NOT map it to mammography or every screen query
+    # collapses onto breast-cancer docs.
+    "screening": {"screen", "detection", "early"},
+    "mammographies": {"mammography", "mammogram", "mammograms", "breast"},
+    "mammography": {"mammogram", "mammograms", "mammographies", "breast"},
+    "mammogram": {"mammography", "mammograms", "mammographies", "breast"},
+    "mammograms": {"mammogram", "mammography", "mammographies", "breast"},
+    "safe": {"safety", "risk", "harm", "harms", "benefit"},
+    "safety": {"safe", "risk", "harm", "harms", "benefit"},
+    "harmful": {"harm", "harms", "risk", "risks", "danger"},
+    "harm": {"harmful", "harms", "risk", "risks"},
+    "harms": {"harm", "harmful", "risk", "risks"},
+    "xray": {"xrays", "radiography", "radiation", "ionizing", "exposure"},
+    "xrays": {"xray", "radiography", "radiation", "ionizing", "exposure"},
+    "radiation": {"ionizing", "radiography", "exposure", "xray", "dose"},
     "consent": {"permission", "authorization", "privacy", "gdpr"},
     "ethics": {"ethical", "principles", "governance", "responsible"},
     "ethical": {"ethics", "principles", "governance", "responsible"},
@@ -95,8 +103,7 @@ _MAMMO_QUESTION_CUES = (
 _MAMMO_DOC_TERMS = (
     "mammogram",
     "mammography",
-    "screening",
-    "radiation",
+    "breast cancer screening",
     "false-positive",
     "false positive",
     "false-negative",
@@ -107,11 +114,68 @@ _MAMMO_DOC_TERMS = (
     "tomosynthesis",
 )
 
+_RADIATION_QUESTION_CUES = (
+    "xray",
+    "x-ray",
+    "x ray",
+    "x-rays",
+    "xrays",
+    "ionizing",
+    "radiation",
+    "radiography",
+    "ct scan",
+    "computed tomography",
+)
+
+_GENERAL_RADIATION_CUES = (
+    "not just",
+    "not only",
+    "all x",
+    "any x",
+    "in general",
+    "generally",
+    "besides breast",
+    "other than breast",
+    "beyond breast",
+    "all screening",
+    "every x",
+)
+
+_RADIATION_DOC_TERMS = (
+    "ionizing radiation",
+    "ionizing",
+    "radiography",
+    "computed tomography",
+    "radiation risk",
+    "radiation exposure",
+    "justified",
+    "optimized",
+    "paediatric imaging",
+    "pediatric imaging",
+    "x-ray",
+)
+
+
+def _canonicalize_text(text: str) -> str:
+    lowered = text.lower()
+    replacements = (
+        ("x-rays", "xrays"),
+        ("x-ray", "xray"),
+        ("x rays", "xrays"),
+        ("x ray", "xray"),
+        ("ct scans", "ct"),
+        ("ct scan", "ct"),
+    )
+    for old, new in replacements:
+        lowered = lowered.replace(old, new)
+    return lowered
+
 
 def tokenize(text: str) -> set[str]:
+    prepared = _canonicalize_text(text)
     return {
         t
-        for t in _TOKEN_RE.findall(text.lower())
+        for t in _TOKEN_RE.findall(prepared)
         if len(t) > 2 and t not in _STOP
     }
 
@@ -145,7 +209,25 @@ def is_privacy_question(question: str) -> bool:
 
 def is_mammography_question(question: str) -> bool:
     q = question.lower()
+    if is_general_radiation_question(question):
+        return False
     return any(cue in q for cue in _MAMMO_QUESTION_CUES)
+
+
+def is_radiation_question(question: str) -> bool:
+    q = _canonicalize_text(question)
+    return any(cue in q for cue in _RADIATION_QUESTION_CUES)
+
+
+def is_general_radiation_question(question: str) -> bool:
+    """True for broad X-ray/radiation questions, not breast-mammography-specific ones."""
+    q = _canonicalize_text(question)
+    if not is_radiation_question(question):
+        return False
+    if any(cue in q for cue in _GENERAL_RADIATION_CUES):
+        return True
+    breast_specific = any(cue in q for cue in _MAMMO_QUESTION_CUES) or "breast" in q
+    return not breast_specific
 
 
 def privacy_search_query(question: str) -> str:
@@ -162,11 +244,20 @@ def mammography_search_query(question: str) -> str:
     )
 
 
+def radiation_search_query(question: str) -> str:
+    return (
+        f"{question} ionizing radiation radiography computed tomography X-ray exposure "
+        "justified optimized paediatric imaging radiation risk benefit"
+    )
+
+
 def extra_search_queries(question: str) -> list[str]:
     extras: list[str] = []
     if is_privacy_question(question):
         extras.append(privacy_search_query(question))
-    if is_mammography_question(question):
+    if is_general_radiation_question(question):
+        extras.append(radiation_search_query(question))
+    elif is_mammography_question(question):
         extras.append(mammography_search_query(question))
     return extras
 
@@ -176,10 +267,91 @@ def _topic_doc_score(question: str, chunk: Chunk) -> float:
     if is_privacy_question(question):
         hits = sum(1 for term in _PRIVACY_DOC_TERMS if term in text)
         return min(1.0, hits / 4.0)
+    if is_general_radiation_question(question):
+        hits = sum(1 for term in _RADIATION_DOC_TERMS if term in text)
+        # Penalize breast-only mammography dumps for general X-ray questions.
+        if "mammogram" in text or "mammography" in text:
+            if "ionizing" not in text and "computed tomography" not in text:
+                hits = max(0, hits - 2)
+        return min(1.0, hits / 3.0)
     if is_mammography_question(question):
         hits = sum(1 for term in _MAMMO_DOC_TERMS if term in text)
         return min(1.0, hits / 4.0)
     return 0.0
+
+
+def _is_general_radiation_chunk(chunk: Chunk) -> bool:
+    """True for WHO-style ionizing radiation / radiography guidance, not breast-screening pages."""
+    title = chunk.title.lower()
+    source = chunk.source.lower()
+    text = chunk.text.lower()
+    blob = f"{title} {source} {text}"
+
+    if "ionizing radiation" in title:
+        return True
+    if "radiation" in title and "world health organization" in source:
+        return True
+
+    strong = sum(
+        1
+        for term in (
+            "computed tomography",
+            "radiography",
+            "nuclear medicine",
+            "radiotherapy",
+            "paediatric imaging",
+            "pediatric imaging",
+            "appropriately justified",
+            "exposure should then be optimized",
+        )
+        if term in blob
+    )
+    breast_heavy = sum(
+        1
+        for term in (
+            "mammogram",
+            "mammography",
+            "breast cancer",
+            "dense breast",
+            "screening mammogram",
+        )
+        if term in blob
+    )
+    return strong >= 2 and breast_heavy <= 1
+
+
+def filter_hits_for_question(
+    question: str,
+    hits: list[tuple[Chunk, float]],
+) -> list[tuple[Chunk, float]]:
+    """Drop off-topic chunks when a clearer topic match exists."""
+    if not hits:
+        return hits
+
+    if is_general_radiation_question(question):
+        focused = [
+            (chunk, score)
+            for chunk, score in hits
+            if _is_general_radiation_chunk(chunk)
+        ]
+        if focused:
+            return focused
+        # Prefer refusing later over answering from breast-only dumps.
+        return []
+
+    if is_privacy_question(question):
+        focused = [
+            (chunk, score)
+            for chunk, score in hits
+            if any(
+                term in f"{chunk.title} {chunk.text}".lower()
+                for term in _PRIVACY_DOC_TERMS
+            )
+        ]
+        if focused:
+            return focused
+
+    return hits
 
 
 def rerank_hits(
@@ -190,7 +362,11 @@ def rerank_hits(
     if not hits:
         return []
 
-    topical = is_privacy_question(question) or is_mammography_question(question)
+    topical = (
+        is_privacy_question(question)
+        or is_mammography_question(question)
+        or is_general_radiation_question(question)
+    )
     scored: list[tuple[float, Chunk, float]] = []
     for chunk, vector_score in hits:
         blob = f"{chunk.title} {chunk.source} {chunk.text}"
@@ -207,7 +383,9 @@ def rerank_hits(
         scored.append((combined, chunk, float(vector_score)))
 
     scored.sort(key=lambda item: item[0], reverse=True)
-    return [(chunk, vector_score) for _, chunk, vector_score in scored[:top_k]]
+    ranked = [(chunk, vector_score) for _, chunk, vector_score in scored]
+    filtered = filter_hits_for_question(question, ranked)
+    return filtered[:top_k]
 
 
 def evidence_is_sufficient(
@@ -220,6 +398,7 @@ def evidence_is_sufficient(
         return False
 
     joined = " ".join(f"{c.title} {c.source} {c.text}" for c in contexts)
+    joined_lower = joined.lower()
     joined_tokens = tokenize(joined)
     best = max(
         (
@@ -232,18 +411,27 @@ def evidence_is_sufficient(
     q = question.lower()
 
     if is_privacy_question(question):
-        return any(term in joined.lower() for term in _PRIVACY_DOC_TERMS)
+        return any(term in joined_lower for term in _PRIVACY_DOC_TERMS)
+
+    if is_general_radiation_question(question):
+        has_general = any(term in joined_lower for term in _RADIATION_DOC_TERMS)
+        mammo_only = (
+            ("mammogram" in joined_lower or "mammography" in joined_lower)
+            and "ionizing" not in joined_lower
+            and "computed tomography" not in joined_lower
+            and "radiography" not in joined_lower
+        )
+        return has_general and not mammo_only
 
     if is_mammography_question(question):
-        return any(term in joined.lower() for term in _MAMMO_DOC_TERMS)
+        return any(term in joined_lower for term in _MAMMO_DOC_TERMS)
 
-    if any(word in q for word in ("benefit", "risk", "negative", "positive", "pros", "cons")):
-        if any(word in joined.lower() for word in ("benefit", "risk", "harm", "privacy", "bias")):
+    if any(word in q for word in ("benefit", "risk", "negative", "positive", "pros", "cons", "harmful", "harm")):
+        if any(word in joined_lower for word in ("benefit", "risk", "harm", "privacy", "bias", "radiation")):
             return True
 
-    # Generic "is X safe?" with radiation/imaging context in evidence.
     if "safe" in q or "safety" in q:
-        if any(term in joined.lower() for term in ("radiation", "risk", "harm", "benefit", "mammogram")):
+        if any(term in joined_lower for term in ("radiation", "risk", "harm", "benefit", "mammogram")):
             return True
 
     distinctive = distinctive_question_terms(question)

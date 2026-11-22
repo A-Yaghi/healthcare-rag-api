@@ -95,9 +95,26 @@ def _lowercase_lead(text: str) -> str:
 
 
 def _relevant_sentences(question: str, contexts: list[Chunk], limit: int = 8) -> list[str]:
+    from app.rag.retrieve import is_general_radiation_question
+
+    radiation_boost = (
+        "ionizing",
+        "radiation",
+        "radiography",
+        "computed tomography",
+        "justified",
+        "optimized",
+        "x-ray",
+        "xray",
+        "exposure",
+    )
     scored: list[tuple[float, str]] = []
     for _, sentence in _unique_sentences(contexts):
         score = lexical_overlap_score(question, sentence)
+        lower = sentence.lower()
+        if is_general_radiation_question(question):
+            boost = sum(0.08 for term in radiation_boost if term in lower)
+            score += boost
         if score <= 0:
             continue
         scored.append((score, sentence))
@@ -112,18 +129,25 @@ def _insufficient_answer(question: str, contexts: list[Chunk]) -> str:
         f"answer to: '{question}'. "
         f"Closest retrieved sources were: {available}. "
         f"Try questions about FDA/EU AI medical-device rules, WHO AI ethics, "
-        f"privacy/data-protection considerations in those docs, mammography, "
-        f"breast cancer screening, or medical imaging radiation safety."
+        f"privacy/data-protection considerations in those docs, mammography / "
+        f"breast cancer screening, or WHO ionizing radiation (X-ray/CT) safety."
     )
 
 
 def _answer_addresses_question(question: str, answer: str) -> bool:
+    from app.rag.retrieve import is_general_radiation_question
+
     low = answer.lower()
     if "don't know" in low or "do not know" in low:
         return True
     if _wants_pros_cons(question):
         return ("benefit" in low or "positive" in low) and (
             "risk" in low or "harm" in low or "negative" in low
+        )
+    if is_general_radiation_question(question):
+        return any(
+            term in low
+            for term in ("radiation", "ionizing", "radiography", "exposure", "x-ray", "xray")
         )
     distinctive = distinctive_question_terms(question)
     if not distinctive:
@@ -275,15 +299,12 @@ class HybridGenerator:
             "don't know" in low
             or "do not know" in low
             or "i don't know from the indexed corpus" in low
-        ):
-            return _insufficient_answer(question, contexts)
-
-        if (
-            _is_weak_answer(llm_answer)
+            or _is_weak_answer(llm_answer)
             or "…" in llm_answer
             or "..." in llm_answer
             or not _answer_addresses_question(question, llm_answer)
         ):
+            # Evidence already passed — prefer grounded narrative over a hard refuse.
             return self.narrative.generate(question, contexts)
 
         if "Sources:" not in llm_answer and citations:

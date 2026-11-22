@@ -11,6 +11,7 @@ from app.rag.chat import build_search_question
 from app.rag.generator import ExtractiveGenerator, _is_weak_answer
 from app.rag.normalize import QueryNormalizer, build_normalizer_from_chunks
 from app.rag.pipeline import RAGPipeline, build_or_load_store
+from app.rag.retrieve import evidence_is_sufficient, is_general_radiation_question
 from app.schemas import ChatMessage
 
 
@@ -151,6 +152,21 @@ def test_search_question_ignores_history_for_new_full_questions() -> None:
     assert "medical imaging" not in question.lower()
 
 
+def test_search_question_ignores_history_on_topic_shift() -> None:
+    question = build_search_question(
+        [
+            ChatMessage(role="user", content="Can xray screening be harmful?"),
+            ChatMessage(role="assistant", content="..."),
+            ChatMessage(
+                role="user",
+                content="not just breast screening. are all xray screening harmful?",
+            ),
+        ]
+    )
+    assert "Can xray screening" not in question
+    assert "all xray" in question.lower()
+
+
 def test_weak_answer_detection() -> None:
     assert _is_weak_answer("protect autonomy")
     assert not _is_weak_answer(
@@ -191,6 +207,43 @@ def test_mammography_safety_question(settings: Settings) -> None:
         term in answer.lower()
         for term in ("mammogram", "radiation", "risk", "benefit", "harm", "screening")
     )
+
+
+def test_general_xray_question_uses_radiation_docs(settings: Settings) -> None:
+    assert is_general_radiation_question("Can xray screening be harmful?")
+    assert is_general_radiation_question(
+        "not just breast screening. are all xray screening harmful?"
+    )
+    assert not is_general_radiation_question("Are mammographies safe?")
+
+    mammo_chunks = [
+        c
+        for c in load_knowledge_chunks(settings.knowledge_dir)
+        if "mammogram" in c.text.lower() and "ionizing radiation has" not in c.text.lower()
+    ][:3]
+    assert not evidence_is_sufficient(
+        "not just breast screening. are all xray screening harmful?",
+        mammo_chunks,
+    )
+
+    radiation_chunks = [
+        c
+        for c in load_knowledge_chunks(settings.knowledge_dir)
+        if "ionizing radiation has" in c.text.lower()
+        or "appropriately justified" in c.text.lower()
+    ][:3]
+    assert radiation_chunks
+    for q in (
+        "Can xray screening be harmful?",
+        "Are all x-ray screening exams harmful?",
+    ):
+        answer = ExtractiveGenerator().generate(q, radiation_chunks)
+        assert "don't know" not in answer.lower()
+        assert "breast cancer" not in answer.lower()
+        assert any(
+            term in answer.lower()
+            for term in ("radiation", "ionizing", "risk", "benefit", "justified", "exposure")
+        )
 
 
 def test_extractive_pros_cons(settings: Settings) -> None:

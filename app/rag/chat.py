@@ -10,9 +10,18 @@ _FOLLOWUP_RE = re.compile(
     re.I,
 )
 
+_TOPIC_SHIFT_RE = re.compile(
+    r"\b(not just|not only|more generally|in general|generally|"
+    r"besides|other than|instead|another topic|forget (that|about)|"
+    r"all (x-?rays?|screening)|beyond)\b",
+    re.I,
+)
+
 
 def _is_short_followup(text: str) -> bool:
     """Only blend history for clearly dependent short follow-ups."""
+    if _TOPIC_SHIFT_RE.search(text):
+        return False
     words = text.split()
     if len(words) <= 8:
         return True

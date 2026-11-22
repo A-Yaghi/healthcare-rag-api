@@ -16,6 +16,10 @@ _SEED_TERMS = {
     "mammographies",
     "screening",
     "radiation",
+    "ionizing",
+    "radiography",
+    "xray",
+    "xrays",
     "privacy",
     "consent",
     "gdpr",
@@ -39,6 +43,7 @@ _SEED_TERMS = {
     "intelligence",
     "profitable",
     "profit",
+    "harmful",
 }
 
 
