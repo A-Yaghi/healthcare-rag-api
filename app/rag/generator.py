@@ -4,7 +4,12 @@ import re
 from typing import Protocol
 
 from app.rag.documents import Chunk, split_sentences
-from app.rag.retrieve import evidence_is_sufficient, lexical_overlap_score, tokenize
+from app.rag.retrieve import (
+    distinctive_question_terms,
+    evidence_is_sufficient,
+    lexical_overlap_score,
+    tokenize,
+)
 
 
 class AnswerGenerator(Protocol):
@@ -17,12 +22,16 @@ def _cite(chunk: Chunk) -> str:
 
 def _is_weak_answer(text: str) -> bool:
     cleaned = text.strip()
-    if len(cleaned) < 80:
+    if len(cleaned) < 60:
         return True
     words = re.findall(r"[A-Za-z0-9']+", cleaned)
-    if len(words) < 18:
+    if len(words) < 12:
         return True
-    if cleaned.count(".") == 0 and len(words) < 30:
+    low = cleaned.lower()
+    if low.startswith(("here is what", "based on ", "drawing only")):
+        # Narrative dumps are a fallback, not preferred LLM output.
+        return False
+    if cleaned.count(".") == 0 and len(words) < 28:
         return True
     return False
 
@@ -30,16 +39,8 @@ def _is_weak_answer(text: str) -> bool:
 def _wants_pros_cons(question: str) -> bool:
     q = question.lower()
     cues = (
-        "benefit",
-        "risk",
-        "negative",
-        "positive",
-        "pros",
-        "cons",
-        "advantage",
-        "disadvantage",
-        "challenge",
-        "drawback",
+        "benefit", "risk", "negative", "positive", "pros", "cons",
+        "advantage", "disadvantage", "challenge", "drawback",
     )
     return any(cue in q for cue in cues)
 
@@ -60,29 +61,12 @@ def _unique_sentences(contexts: list[Chunk]) -> list[tuple[str, str]]:
 def _classify_sentence(sentence: str) -> str:
     lower = sentence.lower()
     benefit_cues = (
-        "benefit",
-        "improve",
-        "assist",
-        "support",
-        "promise",
-        "help",
-        "reduce",
-        "enable",
-        "useful",
-        "potential applications",
+        "benefit", "improve", "assist", "support", "promise", "help",
+        "reduce", "enable", "useful", "potential applications",
     )
     risk_cues = (
-        "risk",
-        "bias",
-        "hallucin",
-        "privacy",
-        "inaccurate",
-        "harm",
-        "challenge",
-        "limitation",
-        "false",
-        "threat",
-        "concern",
+        "risk", "bias", "hallucin", "privacy", "inaccurate", "harm",
+        "challenge", "limitation", "false", "threat", "concern",
     )
     bscore = sum(1 for cue in benefit_cues if cue in lower)
     rscore = sum(1 for cue in risk_cues if cue in lower)
@@ -124,30 +108,41 @@ def _relevant_sentences(question: str, contexts: list[Chunk], limit: int = 8) ->
 def _insufficient_answer(question: str, contexts: list[Chunk]) -> str:
     available = "; ".join(sorted({_cite(c) for c in contexts})) or "none"
     return (
-        f"I do not have enough grounded evidence in the indexed corpus to answer "
-        f"this specifically: '{question}'. "
-        f"The closest retrieved sources were: {available}. "
-        f"Try asking about topics covered by the corpus (FDA device AI guidance, "
-        f"EU AI Act / MDR interplay, WHO AI ethics, mammography, or GMLP)."
+        f"I don't know from the indexed corpus. The sources do not contain a direct "
+        f"answer to: '{question}'. "
+        f"Closest retrieved sources were: {available}. "
+        f"Try questions about FDA/EU AI medical-device rules, WHO AI ethics, "
+        f"privacy/data-protection considerations in those docs, mammography, "
+        f"breast cancer screening, or medical imaging radiation safety."
     )
 
 
+def _answer_addresses_question(question: str, answer: str) -> bool:
+    low = answer.lower()
+    if "don't know" in low or "do not know" in low:
+        return True
+    if _wants_pros_cons(question):
+        return ("benefit" in low or "positive" in low) and (
+            "risk" in low or "harm" in low or "negative" in low
+        )
+    distinctive = distinctive_question_terms(question)
+    if not distinctive:
+        return True
+    answer_terms = tokenize(answer)
+    coverage = len(distinctive & answer_terms) / len(distinctive)
+    return coverage >= 0.25
+
+
 class NarrativeGenerator:
-    """Question-aware natural-language fallback using relevant full sentences."""
+    """Question-aware fallback; refuses when evidence is weak."""
 
     def generate(self, question: str, contexts: list[Chunk]) -> str:
-        if not contexts:
-            return (
-                "I could not find relevant information in the indexed corpus "
-                f"for: {question}"
-            )
-
-        if not evidence_is_sufficient(question, contexts):
+        if not contexts or not evidence_is_sufficient(question, contexts):
             return _insufficient_answer(question, contexts)
 
         citations = "; ".join(sorted({_cite(c) for c in contexts}))
         relevant = _relevant_sentences(question, contexts, limit=8)
-        if len(relevant) < 2 and lexical_overlap_score(question, " ".join(relevant)) < 0.2:
+        if len(relevant) < 2:
             return _insufficient_answer(question, contexts)
 
         if _wants_pros_cons(question):
@@ -161,18 +156,24 @@ class NarrativeGenerator:
                 or _join_sentences(other, 2)
             )
             answer = (
-                f"Drawing only on the indexed sources relevant to your question:\n\n"
+                f"From the indexed sources:\n\n"
                 f"On the positive side, {_lowercase_lead(benefit_text)}\n\n"
-                f"On the risk side, {_lowercase_lead(risk_text)}"
+                f"On the risk side, {_lowercase_lead(risk_text)}\n\n"
+                f"Sources: {citations}"
             )
-            return f"{answer}\n\nSources: {citations}"
+            if not _answer_addresses_question(question, answer):
+                return _insufficient_answer(question, contexts)
+            return answer
 
-        overview = _join_sentences(relevant, limit=7)
-        return (
-            f"Here is what the indexed sources say that is most relevant to "
-            f"your question:\n\n{_lowercase_lead(overview)}\n\n"
+        overview = _join_sentences(relevant, limit=6)
+        answer = (
+            f"From the indexed sources most relevant to your question:\n\n"
+            f"{overview}\n\n"
             f"Sources: {citations}"
         )
+        if not _answer_addresses_question(question, answer):
+            return _insufficient_answer(question, contexts)
+        return answer
 
 
 class ExtractiveGenerator:
@@ -184,9 +185,9 @@ class ExtractiveGenerator:
 
 
 class FlanT5Generator:
-    """Small grounded LLM layer: rewrite retrieved evidence into natural prose."""
+    """Grounded LLM layer — stronger FLAN-T5 variant via settings."""
 
-    def __init__(self, model_name: str, max_new_tokens: int = 320) -> None:
+    def __init__(self, model_name: str, max_new_tokens: int = 384) -> None:
         from transformers import pipeline
 
         self._pipe = pipeline(
@@ -203,7 +204,6 @@ class FlanT5Generator:
         reserve_ids = self._tokenizer.encode(reserve, add_special_tokens=True)
         budget = max(128, 480 - len(reserve_ids))
 
-        # Prefer sentences that overlap the question.
         ranked = []
         for cite, sentence in _unique_sentences(contexts):
             score = lexical_overlap_score(question, sentence)
@@ -232,23 +232,20 @@ class FlanT5Generator:
     def generate(self, question: str, contexts: list[Chunk]) -> str:
         if not contexts:
             return (
-                "I could not find relevant information in the indexed corpus "
-                f"for: {question}"
+                "I don't know from the indexed corpus — no relevant passages were retrieved."
             )
 
+        instruction = (
+            "You are a careful assistant for a retrieval system. "
+            "Answer ONLY using the context. "
+            "If the context does not directly answer the question, reply exactly: "
+            "I don't know from the indexed corpus. "
+            "Do not invent facts. Do not dump unrelated regulations. "
+            "Write clear natural sentences."
+        )
         if _wants_pros_cons(question):
-            instruction = (
-                "You are a helpful assistant. Using ONLY the context, answer THIS "
-                "question with two short paragraphs: benefits and risks. "
-                "Ignore unrelated context. Do not copy the context verbatim."
-            )
-        else:
-            instruction = (
-                "You are a helpful assistant. Using ONLY the context, answer THIS "
-                "exact question in 2-5 complete sentences. Focus on the question's "
-                "specific entities (for example US vs EU, imaging, FDA, AI Act). "
-                "If the context does not answer the question, say you do not know. "
-                "Do not reuse a generic WHO summary unless it directly answers the question."
+            instruction += (
+                " If answering, use two short paragraphs: benefits, then risks."
             )
 
         context_block = self._fit_context(question, contexts, instruction)
@@ -256,42 +253,36 @@ class FlanT5Generator:
             f"{instruction}\n\nContext:\n{context_block}\n\n"
             f"Question: {question}\nAnswer:"
         )
-        result = self._pipe(prompt)[0]["generated_text"].strip()
-        return result
+        return self._pipe(prompt)[0]["generated_text"].strip()
 
 
 class HybridGenerator:
-    """Grounded LLM synthesis with question-aware narrative fallback."""
+    """Stronger grounded LLM with strict refusal when evidence is weak."""
 
     def __init__(self, llm: FlanT5Generator) -> None:
         self.llm = llm
         self.narrative = NarrativeGenerator()
 
     def generate(self, question: str, contexts: list[Chunk]) -> str:
-        if not contexts:
-            return self.narrative.generate(question, contexts)
-
-        if not evidence_is_sufficient(question, contexts):
-            return self.narrative.generate(question, contexts)
+        if not contexts or not evidence_is_sufficient(question, contexts):
+            return _insufficient_answer(question, contexts)
 
         llm_answer = self.llm.generate(question, contexts)
         citations = "; ".join(sorted({_cite(c) for c in contexts}))
-        q_terms = tokenize(question)
+        low = llm_answer.lower()
 
-        # Reject LLM answers that ignore the question's key terms when those terms
-        # exist in the retrieved evidence (common failure mode: generic WHO dump).
-        answer_terms = tokenize(llm_answer)
-        important = {t for t in q_terms if len(t) > 3}
-        if important and llm_answer:
-            coverage = len(important & answer_terms) / len(important)
-        else:
-            coverage = 1.0
+        if (
+            "don't know" in low
+            or "do not know" in low
+            or "i don't know from the indexed corpus" in low
+        ):
+            return _insufficient_answer(question, contexts)
 
         if (
             _is_weak_answer(llm_answer)
             or "…" in llm_answer
             or "..." in llm_answer
-            or coverage < 0.2
+            or not _answer_addresses_question(question, llm_answer)
         ):
             return self.narrative.generate(question, contexts)
 

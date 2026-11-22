@@ -21,6 +21,7 @@ It is **not medical advice** and is **not affiliated with** WHO, FDA, Health Can
 | `knowledge/who_ai_ethics_principles.md` | World Health Organization | **CC BY-NC-SA 3.0 IGO** | https://www.who.int/publications/i/item/9789240029200 |
 | `knowledge/who_lmm_guidance.md` | World Health Organization | **CC BY-NC-SA 3.0 IGO** | https://www.who.int/publications/i/item/9789240084759 |
 | `knowledge/who_regulatory_considerations.md` | World Health Organization | **CC BY-NC-SA 3.0 IGO** | https://www.who.int/publications/i/item/9789240078871 |
+| `knowledge/who_privacy_data_protection_ai.md` | World Health Organization / ITU FG-AI4H | **CC BY-NC-SA 3.0 IGO** | https://www.who.int/publications/i/item/9789240078871 |
 
 ## Licence split
 

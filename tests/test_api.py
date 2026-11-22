@@ -158,6 +158,12 @@ def test_weak_answer_detection() -> None:
     )
 
 
+def test_off_corpus_question_refuses(settings: Settings) -> None:
+    chunks = load_knowledge_chunks(settings.knowledge_dir)[:3]
+    answer = ExtractiveGenerator().generate("Is AI research profitable?", chunks)
+    assert "don't know" in answer.lower() or "do not know" in answer.lower()
+
+
 def test_extractive_pros_cons(settings: Settings) -> None:
     chunks = [
         c

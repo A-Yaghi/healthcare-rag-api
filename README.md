@@ -80,7 +80,7 @@ Open [http://127.0.0.1:8000/](http://127.0.0.1:8000/) for a corpus-grounded chat
 - `GET /health` — liveness + index size + active models
 - `GET /metrics` — request count, avg / p95 latency (API key required)
 - API key auth via `X-API-Key`
-- Default stack: **all-MiniLM-L6-v2** + **google/flan-t5-small**
+- Default stack: **all-MiniLM-L6-v2** + **google/flan-t5-base** (set `GENERATOR_MODEL=google/flan-t5-large` for higher quality / slower CPU)
 - Docker + Compose
 - CI: Ruff + Pytest (offline hash embeddings, no model download)
 
@@ -126,7 +126,7 @@ GENERATION_MODE=retrieve
 | Mode | Behavior | When to use |
 |------|----------|-------------|
 | `retrieve` | Top-k chunks composed into a cited answer | CI / quick CPU demos |
-| `generate` (default) | Same retrieval + `google/flan-t5-small` | Full portfolio demo |
+| `generate` (default) | Same retrieval + `google/flan-t5-base` | Full portfolio demo |
 
 ## Docker
 

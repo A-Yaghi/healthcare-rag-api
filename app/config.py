@@ -20,7 +20,8 @@ class Settings(BaseSettings):
     # retrieve | generate
     generation_mode: str = "retrieve"
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
-    generator_model: str = "google/flan-t5-small"
+    # flan-t5-base is a stronger local default; set flan-t5-large for higher quality (slower).
+    generator_model: str = "google/flan-t5-base"
     top_k: int = 4
 
     index_dir: Path = ROOT_DIR / "data" / "index"
