@@ -20,9 +20,10 @@ from app.rag.generator import (
     FlanT5Generator,
     HybridGenerator,
 )
-from app.rag.retrieve import rerank_hits
+from app.rag.retrieve import is_privacy_question, privacy_search_query, rerank_hits
 from app.rag.store import FaissStore
 from app.schemas import ChatMessage, ChatResponse, QueryResponse, SourceChunk
+from app.rag.documents import Chunk
 
 
 class RAGPipeline:
@@ -48,11 +49,22 @@ class RAGPipeline:
     def indexed_chunks(self) -> int:
         return self.store.size
 
-    def _retrieve(self, question: str, top_k: int) -> list[tuple[object, float]]:
+    def _retrieve(self, question: str, top_k: int) -> list[tuple[Chunk, float]]:
         # Over-fetch then rerank so different questions don't collapse to the same docs.
-        candidate_k = min(max(top_k * 4, top_k), max(self.store.size, top_k))
-        query_vec = self.embedder.embed([question])
-        raw_hits = self.store.search(query_vec, candidate_k)
+        candidate_k = min(max(top_k * 5, top_k), max(self.store.size, top_k))
+        queries = [question]
+        if is_privacy_question(question):
+            queries.append(privacy_search_query(question))
+
+        merged: dict[str, tuple[Chunk, float]] = {}
+        for query in queries:
+            query_vec = self.embedder.embed([query])
+            for chunk, score in self.store.search(query_vec, candidate_k):
+                prev = merged.get(chunk.doc_id)
+                if prev is None or score > prev[1]:
+                    merged[chunk.doc_id] = (chunk, float(score))
+
+        raw_hits = list(merged.values())
         return rerank_hits(question, raw_hits, top_k=top_k)
 
     def query(self, question: str, top_k: int | None = None) -> QueryResponse:

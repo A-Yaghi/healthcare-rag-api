@@ -13,7 +13,6 @@ _STOP = {
     "using", "use", "used", "we", "you", "our", "their", "this", "that", "than",
 }
 
-# Very common domain words — alone they do not prove the corpus answers the question.
 _COMMON_DOMAIN = {
     "ai", "artificial", "intelligence", "health", "healthcare", "medical", "medicine",
     "cancer", "breast", "device", "devices", "system", "systems", "model", "models",
@@ -38,6 +37,34 @@ _SYNONYMS = {
     "privacy": {"protection", "confidential", "gdpr", "consent", "personal"},
     "screening": {"mammogram", "mammography", "screen"},
 }
+
+_PRIVACY_QUESTION_CUES = (
+    "freely",
+    "free to",
+    "medical data",
+    "patient data",
+    "health data",
+    "personal data",
+    "privacy",
+    "gdpr",
+    "consent",
+    "data protection",
+    "share data",
+    "reuse data",
+)
+
+_PRIVACY_DOC_TERMS = (
+    "privacy",
+    "data protection",
+    "consent",
+    "gdpr",
+    "confidential",
+    "freely reusable",
+    "medical data",
+    "personal health data",
+    "lawful",
+    "cybersecurity",
+)
 
 
 def tokenize(text: str) -> set[str]:
@@ -70,6 +97,25 @@ def distinctive_question_terms(question: str) -> set[str]:
     return {t for t in terms if t not in _COMMON_DOMAIN and len(t) >= 5}
 
 
+def is_privacy_question(question: str) -> bool:
+    q = question.lower()
+    return any(cue in q for cue in _PRIVACY_QUESTION_CUES)
+
+
+def privacy_search_query(question: str) -> str:
+    """Rewrite privacy questions so vector search finds governance docs, not cancer pages."""
+    return (
+        f"{question} privacy data protection consent GDPR medical personal health data "
+        "lawful basis safeguards cybersecurity"
+    )
+
+
+def _privacy_doc_score(chunk: Chunk) -> float:
+    text = f"{chunk.title} {chunk.source} {chunk.text}".lower()
+    hits = sum(1 for term in _PRIVACY_DOC_TERMS if term in text)
+    return min(1.0, hits / 4.0)
+
+
 def rerank_hits(
     question: str,
     hits: list[tuple[Chunk, float]],
@@ -78,13 +124,21 @@ def rerank_hits(
     if not hits:
         return []
 
+    privacy_q = is_privacy_question(question)
     scored: list[tuple[float, Chunk, float]] = []
     for chunk, vector_score in hits:
-        lex = lexical_overlap_score(
-            question,
-            f"{chunk.title} {chunk.source} {chunk.text}",
-        )
-        combined = (0.50 * float(vector_score)) + (0.50 * lex)
+        blob = f"{chunk.title} {chunk.source} {chunk.text}"
+        lex = lexical_overlap_score(question, blob)
+        if privacy_q:
+            topic = _privacy_doc_score(chunk)
+            # Strongly prefer privacy/governance passages over generic medical pages.
+            combined = (
+                (0.25 * float(vector_score))
+                + (0.25 * lex)
+                + (0.50 * topic)
+            )
+        else:
+            combined = (0.50 * float(vector_score)) + (0.50 * lex)
         scored.append((combined, chunk, float(vector_score)))
 
     scored.sort(key=lambda item: item[0], reverse=True)
@@ -112,12 +166,9 @@ def evidence_is_sufficient(
 
     q = question.lower()
 
-    # Privacy / "freely use medical data" questions need privacy/protection evidence.
-    if any(w in q for w in ("freely", "free to", "any data", "medical data", "patient data")):
-        privacy_hits = ("privacy", "protection", "consent", "gdpr", "confidential")
-        return any(w in joined.lower() for w in privacy_hits)
+    if is_privacy_question(question):
+        return any(term in joined.lower() for term in _PRIVACY_DOC_TERMS)
 
-    # Pros/cons grounded if sources discuss benefits and risks.
     if any(word in q for word in ("benefit", "risk", "negative", "positive", "pros", "cons")):
         if any(word in joined.lower() for word in ("benefit", "risk", "harm", "privacy", "bias")):
             return True
@@ -125,7 +176,6 @@ def evidence_is_sufficient(
     distinctive = distinctive_question_terms(question)
     if distinctive:
         covered = distinctive & joined_tokens
-        # Require most distinctive concepts to appear in evidence.
         if len(covered) / len(distinctive) < 0.34:
             return False
 

@@ -164,6 +164,20 @@ def test_off_corpus_question_refuses(settings: Settings) -> None:
     assert "don't know" in answer.lower() or "do not know" in answer.lower()
 
 
+def test_privacy_medical_data_question(settings: Settings) -> None:
+    chunks = [
+        c
+        for c in load_knowledge_chunks(settings.knowledge_dir)
+        if "privacy" in c.text.lower() or "data protection" in c.text.lower()
+    ][:4]
+    answer = ExtractiveGenerator().generate(
+        "Can we freely use AI on medical data?",
+        chunks,
+    )
+    assert "don't know" not in answer.lower()
+    assert "privacy" in answer.lower() or "constrained" in answer.lower()
+
+
 def test_extractive_pros_cons(settings: Settings) -> None:
     chunks = [
         c
