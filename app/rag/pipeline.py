@@ -26,12 +26,16 @@ class RAGPipeline:
         generator: AnswerGenerator,
         generation_mode: str,
         default_top_k: int,
+        embedding_model: str,
+        generator_model: str | None,
     ) -> None:
         self.store = store
         self.embedder = embedder
         self.generator = generator
         self.generation_mode = generation_mode
         self.default_top_k = default_top_k
+        self.embedding_model = embedding_model
+        self.generator_model = generator_model
 
     @property
     def indexed_chunks(self) -> int:
@@ -52,6 +56,9 @@ class RAGPipeline:
                 title=chunk.title,
                 text=chunk.text,
                 score=round(score, 4),
+                source=chunk.source,
+                license=chunk.license,
+                url=chunk.url,
             )
             for chunk, score in hits
         ]
@@ -60,6 +67,8 @@ class RAGPipeline:
             sources=sources,
             generation_mode=self.generation_mode,
             latency_ms=round(latency_ms, 2),
+            embedding_model=self.embedding_model,
+            generator_model=self.generator_model,
         )
 
 
@@ -109,11 +118,16 @@ def create_pipeline(settings: Settings, offline: bool | None = None) -> RAGPipel
     use_offline = settings.offline_embeddings if offline is None else offline
     embedder = _build_embedder(settings, offline=use_offline)
     generator = _build_generator(settings, offline=use_offline)
-    mode = settings.generation_mode.lower().strip()
-    if use_offline or mode == "retrieve":
-        mode = "retrieve"
 
-    embedder_name = "hash" if use_offline else settings.embedding_model
+    requested_mode = settings.generation_mode.lower().strip()
+    if use_offline or requested_mode == "retrieve":
+        mode = "retrieve"
+        generator_model = None
+    else:
+        mode = "generate"
+        generator_model = settings.generator_model
+
+    embedder_name = "hash-offline" if use_offline else settings.embedding_model
     store = build_or_load_store(settings, embedder, embedder_name=embedder_name)
     return RAGPipeline(
         store=store,
@@ -121,4 +135,6 @@ def create_pipeline(settings: Settings, offline: bool | None = None) -> RAGPipel
         generator=generator,
         generation_mode=mode,
         default_top_k=settings.top_k,
+        embedding_model=embedder_name,
+        generator_model=generator_model,
     )

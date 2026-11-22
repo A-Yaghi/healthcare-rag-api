@@ -60,7 +60,7 @@ def test_query_rejects_bad_key(client: TestClient) -> None:
 def test_query_returns_sources(client: TestClient) -> None:
     response = client.post(
         "/v1/query",
-        json={"question": "How does multimodal fusion help breast imaging?"},
+        json={"question": "What are microcalcifications on a mammogram?"},
         headers={"X-API-Key": "test-key"},
     )
     assert response.status_code == 200
@@ -69,6 +69,8 @@ def test_query_returns_sources(client: TestClient) -> None:
     assert len(body["sources"]) >= 1
     assert body["latency_ms"] >= 0
     assert body["generation_mode"] == "retrieve"
+    assert body["sources"][0]["source"]
+    assert body["sources"][0]["url"]
 
 
 def test_metrics(client: TestClient) -> None:
@@ -82,14 +84,22 @@ def test_metrics(client: TestClient) -> None:
     assert response.json()["request_count"] >= 1
 
 
+def test_knowledge_has_source_metadata(settings: Settings) -> None:
+    chunks = load_knowledge_chunks(settings.knowledge_dir)
+    assert len(chunks) >= 5
+    assert any(c.source for c in chunks)
+    assert any("WHO" in c.source for c in chunks)
+    assert any(c.url.startswith("http") for c in chunks)
+
+
 def test_pipeline_offline(settings: Settings) -> None:
     embedder = HashEmbeddingBackend()
     chunks = load_knowledge_chunks(settings.knowledge_dir)
-    assert len(chunks) >= 3
+    assert len(chunks) >= 5
     store = build_or_load_store(
         settings,
         embedder,
-        embedder_name="hash",
+        embedder_name="hash-offline",
         rebuild=True,
     )
     pipe = RAGPipeline(
@@ -98,7 +108,10 @@ def test_pipeline_offline(settings: Settings) -> None:
         generator=ExtractiveGenerator(),
         generation_mode="retrieve",
         default_top_k=2,
+        embedding_model="hash-offline",
+        generator_model=None,
     )
-    result = pipe.query("Explain RAG safety controls")
+    result = pipe.query("What are WHO ethical principles for AI in health?")
     assert result.sources
-    assert "RAG" in result.answer or "retrieval" in result.answer.lower()
+    assert any(s.source for s in result.sources)
+    assert "WHO" in result.answer or "autonomy" in result.answer.lower()

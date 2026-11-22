@@ -1,11 +1,27 @@
 # Healthcare RAG API
 
-Production-style RAG service for digital-health Q&A.
+Production-style Retrieval-Augmented Generation (RAG) service for digital-health Q&A.
 
-Built as a personal portfolio project to practice FastAPI and RAG in the healthcare domain : typed FastAPI endpoints, API-key auth, FAISS vector search, Docker packaging, GitHub Actions CI, and latency metrics.
+Built as a personal portfolio project for **AI Engineer / Software Engineer** roles: typed FastAPI endpoints, API-key auth, Sentence Transformers embeddings, FLAN-T5 generation, FAISS vector search, Docker packaging, GitHub Actions CI, and latency metrics.
 
-> Demo corpus only — educational digital-health notes, not clinical advice and not real patient data.
-> Created in part using Claude Code
+> Demo corpus only — openly attributed public sources. **Not medical advice.** Not affiliated with WHO, FDA, NCI, or NLM.  
+> Created in part using Claude Code / Cursor.
+
+## Knowledge sources
+
+Indexed documents are listed with licence notes in [`data/SOURCES.md`](data/SOURCES.md).
+
+| Source | What we use | Licence |
+|--------|-------------|---------|
+| [MedlinePlus / NLM](https://medlineplus.gov/mammography.html) | Mammography health-topic summary | Public domain (U.S. government) |
+| [National Cancer Institute](https://www.cancer.gov/types/breast/mammograms-fact-sheet) | Mammograms fact sheet (calcifications, BI-RADS, DBT) | Public domain (U.S. government) |
+| [FDA / Health Canada / MHRA GMLP](https://www.canada.ca/en/health-canada/services/drugs-health-products/medical-devices/good-machine-learning-practice-medical-device-development.html) | 10 Good Machine Learning Practice principles | U.S. gov work / attributed Crown materials |
+| [FDA MLMD transparency principles](https://www.fda.gov/medical-devices/artificial-intelligence-enabled-medical-devices/transparency-machine-learning-enabled-medical-devices-guiding-principles) | Transparency / explainability for ML medical devices | U.S. gov / joint principles with attribution |
+| [WHO AI ethics guidance (2021)](https://www.who.int/publications/i/item/9789240029200) | Six consensus ethical principles for AI for health | **CC BY-NC-SA 3.0 IGO** |
+| [WHO LMM guidance (2024)](https://www.who.int/publications/i/item/9789240084759) | Large multi-modal models: benefits & risks | **CC BY-NC-SA 3.0 IGO** |
+| [WHO regulatory considerations (2023)](https://www.who.int/publications/i/item/9789240078871) | Documentation, validation, data quality, privacy | **CC BY-NC-SA 3.0 IGO** |
+
+Code is MIT. WHO excerpts remain CC BY-NC-SA 3.0 IGO (non-commercial, attribution, share-alike). No WHO/FDA endorsement is implied.
 
 ## Architecture
 
@@ -17,41 +33,41 @@ Built as a personal portfolio project to practice FastAPI and RAG in the healthc
                             v
                  +----------------------+
                  | RAG Pipeline         |
-                 | 1) Embed question    |
+                 | 1) MiniLM embed      |
                  | 2) FAISS top-k       |
-                 | 3) Build answer      |
+                 | 3) FLAN-T5 answer    |
                  +-----+----------+-----+
                        |          |
                        v          v
-              sentence-transformers / extractive or FLAN-T5
+              Hugging Face models + cited open sources
                        |
                        v
-              markdown knowledge base (data/knowledge)
+              data/knowledge/*.md (WHO, FDA, NCI, MedlinePlus)
 ```
 
 ```mermaid
 flowchart LR
   A[Client] -->|X-API-Key + question| B[FastAPI]
-  B --> C[Embedder]
+  B --> C[MiniLM Embedder]
   C --> D[FAISS Index]
-  D --> E[Top-k chunks]
+  D --> E[Top-k attributed chunks]
   E --> F{Generation mode}
   F -->|retrieve| G[Extractive answer + citations]
-  F -->|generate| H[FLAN-T5 answer]
-  G --> I[JSON response + latency_ms]
+  F -->|generate| H[FLAN-T5 answer + sources]
+  G --> I[JSON + latency_ms]
   H --> I
   B --> J[/metrics latency tracker/]
 ```
 
 ## Features
 
-- `POST /v1/query` — retrieve grounded answers with source chunks
-- `GET /health` — liveness + index size
+- `POST /v1/query` — grounded answers with source title, organisation, licence, and URL
+- `GET /health` — liveness + index size + active models
 - `GET /metrics` — request count, avg / p95 latency (API key required)
 - API key auth via `X-API-Key`
-- FAISS index persisted under `data/index`
+- Default stack: **all-MiniLM-L6-v2** + **google/flan-t5-small**
 - Docker + Compose
-- CI: Ruff + Pytest (offline embeddings, no model download)
+- CI: Ruff + Pytest (offline hash embeddings, no model download)
 
 ## Quick start (local)
 
@@ -66,7 +82,7 @@ python -m venv .venv
 pip install -r requirements.txt
 copy .env.example .env
 
-# First run downloads the MiniLM embedding model
+# First start downloads MiniLM + FLAN-T5 (can take several minutes)
 uvicorn app.main:app --reload --port 8000
 ```
 
@@ -74,14 +90,14 @@ Open docs: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
 
 ### Example request
 
-```bash
-curl -X POST http://127.0.0.1:8000/v1/query ^
-  -H "Content-Type: application/json" ^
-  -H "X-API-Key: dev-secret-change-me" ^
-  -d "{\"question\": \"What is multimodal fusion in medical imaging?\"}"
+```powershell
+Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/v1/query `
+  -Headers @{"X-API-Key"="dev-secret-change-me"} `
+  -ContentType "application/json" `
+  -Body '{"question":"What are the WHO ethical principles for AI in health?"}'
 ```
 
-### Faster local mode (no Hugging Face download)
+### Faster mode (no model download)
 
 In `.env`:
 
@@ -90,18 +106,12 @@ OFFLINE_EMBEDDINGS=true
 GENERATION_MODE=retrieve
 ```
 
-Or install CI deps only:
-
-```bash
-pip install -r requirements-ci.txt
-```
-
 ## Generation modes
 
 | Mode | Behavior | When to use |
 |------|----------|-------------|
-| `retrieve` (default) | Top-k chunks composed into a cited answer | Demo, CI, CPU-only |
-| `generate` | Same retrieval + `google/flan-t5-small` | Stronger LLM demo (slower first start) |
+| `retrieve` | Top-k chunks composed into a cited answer | CI / quick CPU demos |
+| `generate` (default) | Same retrieval + `google/flan-t5-small` | Full portfolio demo |
 
 ## Docker
 
@@ -109,7 +119,7 @@ pip install -r requirements-ci.txt
 docker compose up --build
 ```
 
-First container start may download the embedding model.
+First container start downloads embedding + generator models.
 
 ## Tests
 
@@ -121,23 +131,21 @@ pytest -q
 ## Project layout
 
 ```text
-app/
-  main.py              # FastAPI app
-  auth.py              # API key dependency
-  metrics.py           # latency tracker
-  rag/                 # embeddings, FAISS store, generators, pipeline
-data/knowledge/        # markdown corpus
-scripts/build_index.py # rebuild FAISS index
-tests/                 # API + pipeline tests
+app/                   FastAPI + RAG pipeline
+data/knowledge/        Attributed open-source markdown corpus
+data/SOURCES.md        Full source + licence table
+scripts/build_index.py Rebuild FAISS index
+tests/                 API + pipeline tests
 Dockerfile
 docker-compose.yml
 .github/workflows/ci.yml
 ```
 
-## blurb
+## CV / LinkedIn blurb
 
-> Built a production-style Healthcare RAG API with FastAPI, FAISS, Sentence Transformers, Docker, and GitHub Actions — including API-key auth, source citations, and latency metrics.
+> Built a production-style Healthcare RAG API with FastAPI, Sentence Transformers, FLAN-T5, FAISS, Docker, and GitHub Actions — indexing attributed open sources from WHO, FDA/Health Canada/MHRA, NCI, and MedlinePlus, with API-key auth, citations, and latency metrics.
 
 ## License
 
-MIT
+- Application code: MIT
+- Knowledge excerpts: see [`data/SOURCES.md`](data/SOURCES.md)

@@ -7,7 +7,7 @@ services:
       API_KEY: ${API_KEY:-dev-secret-change-me}
       APP_NAME: Healthcare RAG API
       ENVIRONMENT: docker
-      GENERATION_MODE: retrieve
+      GENERATION_MODE: generate
       OFFLINE_EMBEDDINGS: "false"
       EMBEDDING_MODEL: sentence-transformers/all-MiniLM-L6-v2
       TOP_K: 3

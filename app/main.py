@@ -25,8 +25,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         title=cfg.app_name,
         version=__version__,
         description=(
-            "Production-style RAG API for digital-health Q&A. "
-            "Authenticate with the X-API-Key header."
+            "Production-style RAG API for digital-health Q&A over openly licensed "
+            "public sources (WHO, FDA/Health Canada/MHRA, NCI, MedlinePlus). "
+            "Authenticate with the X-API-Key header. Not medical advice."
         ),
         lifespan=lifespan,
     )
@@ -39,11 +40,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             status="ok",
             app=cfg.app_name,
             environment=cfg.environment,
-            generation_mode=cfg.generation_mode,
+            generation_mode=(
+                cfg.generation_mode if pipe is None else pipe.generation_mode
+            ),
             indexed_chunks=0 if pipe is None else pipe.indexed_chunks,
             embedding_model=(
-                "hash-offline" if cfg.offline_embeddings else cfg.embedding_model
+                pipe.embedding_model
+                if pipe is not None
+                else ("hash-offline" if cfg.offline_embeddings else cfg.embedding_model)
             ),
+            generator_model=None if pipe is None else pipe.generator_model,
         )
 
     @app.get("/metrics", response_model=MetricsResponse, tags=["ops"])

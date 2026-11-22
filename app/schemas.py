@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 
 class QueryRequest(BaseModel):
     question: str = Field(..., min_length=3, max_length=1000, examples=[
-        "What is multimodal fusion in medical imaging?"
+        "What are WHO ethical principles for AI in health?"
     ])
     top_k: int | None = Field(default=None, ge=1, le=10)
 
@@ -13,6 +13,9 @@ class SourceChunk(BaseModel):
     title: str
     text: str
     score: float
+    source: str = ""
+    license: str = ""
+    url: str = ""
 
 
 class QueryResponse(BaseModel):
@@ -20,6 +23,8 @@ class QueryResponse(BaseModel):
     sources: list[SourceChunk]
     generation_mode: str
     latency_ms: float
+    embedding_model: str
+    generator_model: str | None = None
 
 
 class HealthResponse(BaseModel):
@@ -29,6 +34,7 @@ class HealthResponse(BaseModel):
     generation_mode: str
     indexed_chunks: int
     embedding_model: str
+    generator_model: str | None = None
 
 
 class MetricsResponse(BaseModel):

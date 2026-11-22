@@ -19,10 +19,14 @@ class ExtractiveGenerator:
                 f"for: {question}"
             )
 
-        bullets = "\n".join(f"- ({c.title}) {c.text}" for c in contexts)
+        bullets = []
+        for chunk in contexts:
+            citation = chunk.source or chunk.title
+            bullets.append(f"- ({citation}) {chunk.text}")
+        joined = "\n".join(bullets)
         return (
-            f"Based on the indexed digital-health documents, here is the most "
-            f"relevant evidence for '{question}':\n{bullets}"
+            f"Based on the indexed open digital-health sources, here is the most "
+            f"relevant evidence for '{question}':\n{joined}"
         )
 
 
@@ -34,8 +38,9 @@ class FlanT5Generator:
             "text2text-generation",
             model=model_name,
             tokenizer=model_name,
-            max_new_tokens=160,
+            max_new_tokens=180,
         )
+        self.model_name = model_name
 
     def generate(self, question: str, contexts: list[Chunk]) -> str:
         if not contexts:
@@ -44,7 +49,9 @@ class FlanT5Generator:
                 f"for: {question}"
             )
 
-        context_block = "\n".join(c.text for c in contexts)
+        context_block = "\n".join(
+            f"[{c.source or c.title}] {c.text}" for c in contexts
+        )
         prompt = (
             "Answer the question using only the context. "
             "If the answer is not in the context, say you do not know.\n\n"
@@ -52,4 +59,12 @@ class FlanT5Generator:
             f"Question: {question}\nAnswer:"
         )
         result = self._pipe(prompt)[0]["generated_text"].strip()
-        return result or ExtractiveGenerator().generate(question, contexts)
+        if not result:
+            return ExtractiveGenerator().generate(question, contexts)
+
+        citations = "; ".join(
+            sorted({c.source or c.title for c in contexts if c.source or c.title})
+        )
+        if citations:
+            return f"{result}\n\nSources: {citations}"
+        return result

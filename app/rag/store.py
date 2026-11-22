@@ -35,7 +35,15 @@ class FaissStore:
         directory.mkdir(parents=True, exist_ok=True)
         faiss.write_index(self.index, str(directory / "index.faiss"))
         payload = [
-            {"doc_id": c.doc_id, "title": c.title, "text": c.text} for c in self.chunks
+            {
+                "doc_id": c.doc_id,
+                "title": c.title,
+                "text": c.text,
+                "source": c.source,
+                "license": c.license,
+                "url": c.url,
+            }
+            for c in self.chunks
         ]
         (directory / "chunks.json").write_text(
             json.dumps(payload, ensure_ascii=True, indent=2),
